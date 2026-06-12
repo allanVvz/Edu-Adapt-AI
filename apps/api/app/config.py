@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
     environment: str = "development"
     cors_origins: str = "http://localhost:3000"
+    cors_origin_regex: str = ""
 
     class Config:
         env_file = ".env"

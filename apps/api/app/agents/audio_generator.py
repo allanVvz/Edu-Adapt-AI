@@ -1,19 +1,32 @@
 """
 Audio Generator Agent — creates narration scripts for TTS.
-Reads prompt from packages/prompts/audio/audio-generation.prompt.md
+Adapts voice style based on student autonomy level from profile.
 """
 from typing import Optional
 
+_VOICE_MAP = {
+    "low": "calmo e pausado, com pausas longas entre as instruções",
+    "medium": "claro e objetivo",
+    "high": "direto ao ponto",
+}
+
 
 async def generate_audio_options(activity: dict, profile: dict, openai_key: Optional[str] = None) -> list[dict]:
-    statement = activity.get("statement", "Observe a atividade.")
+    statement = activity.get("statement", "")
     question = activity.get("question", "")
-    voice = "calmo e pausado" if profile.get("autonomy_level") == "low" else "claro e objetivo"
+    autonomy = profile.get("autonomy_level") or "medium"
+    voice = _VOICE_MAP.get(autonomy, "claro e objetivo")
+
+    script_parts = ["Preste atenção."]
+    if statement:
+        script_parts.append(statement)
+    if question:
+        script_parts.append(f"Agora responda:\n\n{question}")
 
     return [
         {
             "id": "audio_1",
-            "script": f"Preste atenção.\n\n{statement}\n\nAgora responda:\n\n{question}",
+            "script": "\n\n".join(script_parts),
             "voice_style": voice,
             "source": "mock",
         }

@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
+import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { Plus, User, BookOpen } from "lucide-react";
+import { Plus, User, Search } from "lucide-react";
 
 interface Student {
   id: string;
@@ -12,6 +13,7 @@ interface Student {
   school_year: string | null;
   profile_name: string | null;
   learning_notes: string | null;
+  teacher_name: string | null;
 }
 
 interface Profile {
@@ -20,15 +22,21 @@ interface Profile {
 }
 
 export default function StudentsPage() {
+  const [isAdmin, setIsAdmin] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({
     name: "", email: "", password: "", school_year: "", profile_id: "", learning_notes: "",
   });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const user = getUser();
+    setIsAdmin(user?.role === "admin");
+    load();
+  }, []);
 
   async function load() {
     const [s, p] = await Promise.all([
@@ -55,9 +63,14 @@ export default function StudentsPage() {
     }
   }
 
+  const filtered = students.filter((s) =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
+    s.email.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <AdminLayout>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-gray-900">Alunos</h1>
         <button
           onClick={() => setShowModal(true)}
@@ -67,22 +80,42 @@ export default function StudentsPage() {
         </button>
       </div>
 
-      {students.length === 0 ? (
+      <div className="flex items-center gap-3 mb-5">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou email..."
+            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <span className="text-xs text-gray-400">{filtered.length} aluno{filtered.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">
           <User size={32} className="mx-auto mb-3 opacity-30" />
-          <p>Nenhum aluno cadastrado ainda.</p>
+          <p>{students.length === 0 ? "Nenhum aluno cadastrado ainda." : "Nenhum resultado para a busca."}</p>
         </div>
       ) : (
-        <div className="grid gap-3">
-          {students.map((s) => (
-            <div key={s.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-50">
+          {filtered.map((s) => (
+            <div key={s.id} className="p-4 flex items-start gap-4">
               <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm flex-shrink-0">
-                {s.name[0]}
+                {s.name[0]?.toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900">{s.name}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-semibold text-gray-900">{s.name}</p>
+                  {isAdmin && s.teacher_name && (
+                    <span className="text-xs text-purple-600 bg-purple-50 rounded-full px-2 py-0.5">
+                      Prof. {s.teacher_name}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400">{s.email}</p>
-                <div className="flex gap-2 mt-1">
+                <div className="flex flex-wrap gap-1.5 mt-1">
                   {s.school_year && (
                     <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{s.school_year}</span>
                   )}
@@ -94,7 +127,6 @@ export default function StudentsPage() {
                   <p className="text-xs text-gray-500 mt-1 line-clamp-1">{s.learning_notes}</p>
                 )}
               </div>
-              <BookOpen size={14} className="text-gray-300 flex-shrink-0 mt-1" />
             </div>
           ))}
         </div>
@@ -143,14 +175,12 @@ export default function StudentsPage() {
                 />
               </div>
               <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg"
-                >
+                <button type="submit" disabled={saving}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg">
                   {saving ? "Criando..." : "Criar aluno"}
                 </button>
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 border border-gray-300 text-gray-600 text-sm py-2 rounded-lg">
+                <button type="button" onClick={() => setShowModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-600 text-sm py-2 rounded-lg">
                   Cancelar
                 </button>
               </div>

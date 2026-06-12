@@ -9,19 +9,22 @@ import { BookOpen, Clock } from "lucide-react";
 interface ActivityItem {
   id: string;
   activity_id: string;
+  title: string | null;
   status: string;
   created_at: string;
 }
 
 export default function StudentPage() {
   const router = useRouter();
-  const user = getUser();
+  const [userName, setUserName] = useState("");
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const user = getUser();
     if (!user) { router.replace("/login"); return; }
     if (user.role !== "student") { router.replace("/dashboard"); return; }
+    setUserName(user.name);
 
     api.get("/student/activities")
       .then((r) => setActivities(r.data))
@@ -32,7 +35,7 @@ export default function StudentPage() {
   return (
     <StudentLayout>
       <div className="mb-6">
-        <h1 className="text-xl font-bold text-gray-900">Olá, {user?.name}! 👋</h1>
+        <h1 className="text-xl font-bold text-gray-900">Olá, {userName || "..."}! 👋</h1>
         <p className="text-sm text-gray-500">Suas atividades de hoje estão aqui.</p>
       </div>
 
@@ -58,8 +61,8 @@ export default function StudentPage() {
                 <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
                   {idx + 1}
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-900">Atividade {idx + 1}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900">{a.title || `Atividade ${idx + 1}`}</p>
                   <div className="flex items-center gap-1 mt-0.5 text-xs text-gray-400">
                     <Clock size={11} />
                     <span>{new Date(a.created_at).toLocaleDateString("pt-BR")}</span>

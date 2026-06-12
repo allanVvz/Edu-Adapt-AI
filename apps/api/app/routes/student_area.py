@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
+from ..models.activity import Activity
 from ..models.student import Student
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
@@ -25,17 +26,33 @@ def _get_student(session: Session, user_id: str) -> Student:
     return student
 
 
+def _can_access(adaptation: ActivityAdaptation, student: Student) -> bool:
+    """True if student has direct assignment or matching profile."""
+    if adaptation.student_id == student.id:
+        return True
+    if adaptation.student_id is None and student.profile_id and adaptation.student_profile_id == student.profile_id:
+        return True
+    return False
+
+
+def _get_item_label(item: object) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("name", str(item))
+    return str(item)
+
+
 def _calculate_score(adaptation_output: dict, response: dict) -> tuple[float, float]:
-    """Simple scoring for drag-and-drop association activities."""
     max_score = 4.0
     try:
         interaction = adaptation_output.get("interaction_options", [{}])[0]
         items = interaction.get("items", [])
-        zones = interaction.get("zones", [])
         if not items:
             return 2.0, 4.0
-        correct = sum(1 for item in items if response.get(item) is not None)
-        score = (correct / len(items)) * max_score
+        labels = [_get_item_label(i) for i in items]
+        correct = sum(1 for label in labels if response.get(label) is not None)
+        score = (correct / len(labels)) * max_score
         return round(score, 2), max_score
     except Exception:
         return 2.0, 4.0
@@ -50,21 +67,40 @@ def list_student_activities(
         raise HTTPException(status_code=403, detail="Only students can access this endpoint")
 
     student = _get_student(session, current_user.id)
-    adaptations = session.exec(
+
+    # Direct assignments
+    direct = session.exec(
         select(ActivityAdaptation).where(
             ActivityAdaptation.student_id == student.id,
             ActivityAdaptation.status == "published",
         )
     ).all()
-    return [
-        {
+
+    # Profile-based (student_id not set, but profile matches)
+    profile_based = []
+    if student.profile_id:
+        profile_based = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == student.profile_id,
+                ActivityAdaptation.student_id == None,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+
+    seen = {a.id for a in direct}
+    adaptations = direct + [a for a in profile_based if a.id not in seen]
+
+    result = []
+    for a in adaptations:
+        activity = session.get(Activity, a.activity_id)
+        result.append({
             "id": a.id,
             "activity_id": a.activity_id,
+            "title": activity.title if activity else None,
             "status": a.status,
             "created_at": a.created_at,
-        }
-        for a in adaptations
-    ]
+        })
+    return result
 
 
 @router.get("/activities/{adaptation_id}")
@@ -78,12 +114,14 @@ def get_student_activity(
 
     student = _get_student(session, current_user.id)
     adaptation = session.get(ActivityAdaptation, adaptation_id)
-    if not adaptation or adaptation.student_id != student.id or adaptation.status != "published":
+    if not adaptation or adaptation.status != "published" or not _can_access(adaptation, student):
         raise HTTPException(status_code=404, detail="Activity not found or not published")
 
+    activity = session.get(Activity, adaptation.activity_id)
     return {
         "id": adaptation.id,
         "activity_id": adaptation.activity_id,
+        "title": activity.title if activity else None,
         "output": adaptation.output_data,
     }
 
@@ -99,7 +137,7 @@ def start_activity(
 
     student = _get_student(session, current_user.id)
     adaptation = session.get(ActivityAdaptation, adaptation_id)
-    if not adaptation or adaptation.student_id != student.id:
+    if not adaptation or not _can_access(adaptation, student):
         raise HTTPException(status_code=404, detail="Activity not found")
 
     attempt = StudentActivityAttempt(
@@ -127,7 +165,7 @@ def submit_activity(
 
     student = _get_student(session, current_user.id)
     adaptation = session.get(ActivityAdaptation, adaptation_id)
-    if not adaptation or adaptation.student_id != student.id:
+    if not adaptation or not _can_access(adaptation, student):
         raise HTTPException(status_code=404, detail="Activity not found")
 
     score, max_score = _calculate_score(adaptation.output_data or {}, body.response)

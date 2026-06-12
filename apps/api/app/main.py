@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
-from .routes import auth, settings as settings_router, students, profiles, activities, adaptations, student_area, dashboard
+from .routes import auth, settings as settings_router, students, profiles, activities, adaptations, student_area, dashboard, admin
 
 app = FastAPI(
     title="EduAdapt AI",
@@ -9,13 +9,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+cors_kwargs = {
+    "allow_origins": settings.cors_origins_list,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if settings.cors_origin_regex:
+    cors_kwargs["allow_origin_regex"] = settings.cors_origin_regex
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 app.include_router(auth.router)
 app.include_router(settings_router.router)
@@ -25,6 +28,7 @@ app.include_router(activities.router)
 app.include_router(adaptations.router)
 app.include_router(student_area.router)
 app.include_router(dashboard.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

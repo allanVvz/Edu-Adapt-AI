@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
 from ..models.activity import Activity
+from ..models.student import Student
 from ..models.student_profile import StudentProfile
+from ..models.user import User
 from ..routes.auth import require_role
 from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation
 import uuid
@@ -16,6 +18,40 @@ router = APIRouter(prefix="/adaptations", tags=["adaptations"])
 
 class FeedbackRequest(BaseModel):
     feedback: Optional[str] = None
+
+
+@router.get("")
+def list_adaptations(
+    status: Optional[str] = None,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    query = select(ActivityAdaptation).order_by(ActivityAdaptation.created_at.desc())
+    if status:
+        query = query.where(ActivityAdaptation.status == status)
+    adaptations = session.exec(query.limit(100)).all()
+    result = []
+    for a in adaptations:
+        activity = session.get(Activity, a.activity_id)
+        profile = session.get(StudentProfile, a.student_profile_id) if a.student_profile_id else None
+        student_name = None
+        if a.student_id:
+            student = session.get(Student, a.student_id)
+            if student:
+                su = session.get(User, student.user_id)
+                student_name = su.name if su else None
+        result.append({
+            "id": a.id,
+            "activity": {"id": activity.id, "title": activity.title} if activity else None,
+            "profile": {"id": profile.id, "name": profile.name} if profile else None,
+            "student_id": a.student_id,
+            "student_name": student_name,
+            "generated_by": a.generated_by,
+            "status": a.status,
+            "version": a.version,
+            "created_at": str(a.created_at),
+        })
+    return result
 
 
 @router.get("/{adaptation_id}")
@@ -31,10 +67,28 @@ def get_adaptation(
     activity = session.get(Activity, adaptation.activity_id)
     profile = session.get(StudentProfile, adaptation.student_profile_id) if adaptation.student_profile_id else None
 
+    teacher = None
+    if activity:
+        teacher = session.get(User, activity.teacher_id)
+
+    student_name = None
+    if adaptation.student_id:
+        student = session.get(Student, adaptation.student_id)
+        if student:
+            su = session.get(User, student.user_id)
+            student_name = su.name if su else None
+
     return {
         "id": adaptation.id,
-        "activity": {"id": activity.id, "title": activity.title} if activity else None,
+        "activity": {
+            "id": activity.id,
+            "title": activity.title,
+            "teacher_id": activity.teacher_id,
+            "teacher_name": teacher.name if teacher else None,
+        } if activity else None,
         "profile": {"id": profile.id, "name": profile.name} if profile else None,
+        "student_id": adaptation.student_id,
+        "student_name": student_name,
         "generated_by": adaptation.generated_by,
         "status": adaptation.status,
         "version": adaptation.version,
@@ -88,8 +142,8 @@ def publish_adaptation(
     adaptation = session.get(ActivityAdaptation, adaptation_id)
     if not adaptation:
         raise HTTPException(status_code=404, detail="Adaptation not found")
-    if adaptation.status not in ("approved", "review"):
-        raise HTTPException(status_code=400, detail="Adaptation must be approved before publishing")
+    if adaptation.status not in ("approved", "review", "rejected"):
+        raise HTTPException(status_code=400, detail="Cannot publish adaptation in current status")
     adaptation.status = "published"
     adaptation.updated_at = datetime.utcnow()
     session.add(adaptation)

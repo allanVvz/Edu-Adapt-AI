@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
@@ -67,12 +68,14 @@ export default function DashboardPage() {
               icon={BarChart3}
               color="bg-purple-100 text-purple-700"
             />
-            <StatCard
-              label="Pendentes de revisão"
-              value={data.pending_adaptations}
-              icon={AlertCircle}
-              color="bg-yellow-100 text-yellow-700"
-            />
+            <Link href="/validations" className="block hover:opacity-90 transition-opacity">
+              <StatCard
+                label="Pendentes de revisão"
+                value={data.pending_adaptations}
+                icon={AlertCircle}
+                color="bg-yellow-100 text-yellow-700"
+              />
+            </Link>
           </div>
 
           {data.avg_score !== null && (

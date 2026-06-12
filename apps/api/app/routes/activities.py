@@ -4,11 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
+from ..models.user import User
 from ..models.activity import Activity
 from ..models.adaptation import ActivityAdaptation
 from ..models.student_profile import StudentProfile
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation
+from ..services.openai_service import get_user_openai_key
+from ..agents.orchestrator import run_adaptation_pipeline
 import uuid
 
 router = APIRouter(prefix="/activities", tags=["activities"])
@@ -37,13 +39,45 @@ class AdaptRequest(BaseModel):
 
 @router.get("")
 def list_activities(
+    status: Optional[str] = None,
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
-    activities = session.exec(
-        select(Activity).where(Activity.teacher_id == current_user.id)
-    ).all()
-    return activities
+    if current_user.role == "admin":
+        query = select(Activity)
+    else:
+        query = select(Activity).where(Activity.teacher_id == current_user.id)
+
+    if status:
+        query = query.where(Activity.status == status)
+
+    activities = session.exec(query.order_by(Activity.created_at.desc())).all()
+
+    result = []
+    for a in activities:
+        all_adaptations = session.exec(
+            select(ActivityAdaptation).where(ActivityAdaptation.activity_id == a.id)
+        ).all()
+        teacher_name = None
+        if current_user.role == "admin":
+            t = session.get(User, a.teacher_id)
+            teacher_name = t.name if t else None
+        result.append({
+            "id": a.id,
+            "title": a.title,
+            "discipline": a.discipline,
+            "school_year": a.school_year,
+            "activity_type": a.activity_type,
+            "base_complexity": a.base_complexity,
+            "status": a.status,
+            "teacher_id": a.teacher_id,
+            "teacher_name": teacher_name,
+            "adaptation_total": len(all_adaptations),
+            "adaptation_pending": len([x for x in all_adaptations if x.status == "review"]),
+            "adaptation_published": len([x for x in all_adaptations if x.status == "published"]),
+            "created_at": str(a.created_at),
+        })
+    return result
 
 
 @router.post("", status_code=201)
@@ -98,35 +132,43 @@ async def adapt_activity(
     session: Session = Depends(get_session),
 ):
     activity = session.get(Activity, activity_id)
-    if not activity or activity.teacher_id != current_user.id:
+    if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
+    if current_user.role != "admin" and activity.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your activity")
 
     activity_dict = {
         "title": activity.title,
+        "discipline": activity.discipline,
+        "school_year": activity.school_year,
+        "pedagogical_objective": activity.pedagogical_objective,
+        "activity_type": activity.activity_type,
         "statement": activity.statement,
         "question": activity.question,
         "expected_answer": activity.expected_answer,
-        "activity_type": activity.activity_type,
+        "base_complexity": activity.base_complexity,
+        "teacher_notes": activity.teacher_notes,
     }
 
-    profile_dict = {}
+    profile_dict: dict = {}
     if body.profile_id:
         profile = session.get(StudentProfile, body.profile_id)
         if profile:
             profile_dict = {
                 "name": profile.name,
+                "reading_level": profile.reading_level,
+                "autonomy_level": profile.autonomy_level,
                 "main_difficulties": profile.main_difficulties,
                 "recommended_strategies": profile.recommended_strategies,
                 "preferred_modalities": profile.preferred_modalities,
+                "resources_to_avoid": profile.resources_to_avoid,
+                "accessibility_complexity": profile.accessibility_complexity,
+                "notes": profile.notes,
             }
 
     openai_key = get_user_openai_key(session, current_user.id)
-    if openai_key:
-        output = await generate_adaptation_with_ai(openai_key, activity_dict, profile_dict)
-        generated_by = "openai"
-    else:
-        output = _mock_adaptation(activity_dict, profile_dict)
-        generated_by = "mock"
+    output = await run_adaptation_pipeline(activity_dict, profile_dict, openai_key)
+    generated_by = "openai" if openai_key else "mock"
 
     adaptation = ActivityAdaptation(
         id=str(uuid.uuid4()),

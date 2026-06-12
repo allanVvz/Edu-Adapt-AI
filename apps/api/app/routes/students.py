@@ -49,7 +49,29 @@ def list_students(
     current_user: User = Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
-    links = session.exec(select(TeacherStudent).where(TeacherStudent.teacher_id == current_user.id)).all()
+    if current_user.role == "admin":
+        all_students = session.exec(select(Student)).all()
+        result = []
+        for student in all_students:
+            user = session.get(User, student.user_id)
+            if not user:
+                continue
+            profile = session.get(StudentProfile, student.profile_id) if student.profile_id else None
+            teacher_link = session.exec(
+                select(TeacherStudent).where(TeacherStudent.student_id == student.id)
+            ).first()
+            teacher_name = None
+            if teacher_link:
+                teacher_user = session.get(User, teacher_link.teacher_id)
+                teacher_name = teacher_user.name if teacher_user else None
+            r = _student_response(user, student, profile)
+            r["teacher_name"] = teacher_name
+            result.append(r)
+        return result
+
+    links = session.exec(
+        select(TeacherStudent).where(TeacherStudent.teacher_id == current_user.id)
+    ).all()
     result = []
     for link in links:
         student = session.get(Student, link.student_id)
@@ -57,7 +79,9 @@ def list_students(
             continue
         user = session.get(User, student.user_id)
         profile = session.get(StudentProfile, student.profile_id) if student.profile_id else None
-        result.append(_student_response(user, student, profile))
+        r = _student_response(user, student, profile)
+        r["teacher_name"] = current_user.name
+        result.append(r)
     return result
 
 

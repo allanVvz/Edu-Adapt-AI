@@ -6,36 +6,40 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import { CheckCircle, Volume2 } from "lucide-react";
 
+type ActivityItem = string | { name: string; image?: string };
+type ActivityZone = string | { name: string };
+const getLabel = (v: ActivityItem | ActivityZone): string =>
+  typeof v === "string" ? v : v.name;
+
 interface OutputData {
   text_adaptations?: Array<{ version: number; content: string }>;
-  audio_options?: Array<{ id: string; script: string; voice_style: string }>;
+  audio_options?: Array<{ id?: string; script: string; voice_style: string }>;
   interaction_options?: Array<{
     type: string;
     instructions: string;
-    items: string[];
-    zones: string[];
-    feedback_correct: string;
-    feedback_incorrect: string;
+    items: ActivityItem[];
+    zones: ActivityZone[];
+    feedback_correct?: string;
+    feedback_incorrect?: string;
   }>;
 }
 
 export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const [title, setTitle] = useState<string | null>(null);
   const [output, setOutput] = useState<OutputData | null>(null);
-  const [attemptId, setAttemptId] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<{ score: number; max_score: number; percentage: number } | null>(null);
-  const [startTime, setStartTime] = useState<number>(Date.now());
+  const [startTime] = useState<number>(Date.now());
 
   useEffect(() => {
     api.get(`/student/activities/${id}`)
       .then(async (r) => {
+        setTitle(r.data.title ?? null);
         setOutput(r.data.output);
-        const { data: start } = await api.post(`/student/activities/${id}/start`);
-        setAttemptId(start.attempt_id);
-        setStartTime(Date.now());
+        await api.post(`/student/activities/${id}/start`).catch(() => {});
       })
       .catch(() => {
         toast.error("Atividade não encontrada.");
@@ -57,10 +61,6 @@ export default function StudentActivityPage() {
     }
   }
 
-  function setAnswer(item: string, zone: string) {
-    setAnswers((prev) => ({ ...prev, [item]: zone }));
-  }
-
   if (!output) return (
     <StudentLayout>
       <div className="flex justify-center py-20">
@@ -73,8 +73,16 @@ export default function StudentActivityPage() {
   const audio = output.audio_options?.[0];
   const interaction = output.interaction_options?.[0];
 
+  const allAnswered = interaction
+    ? interaction.items.every((item) => answers[getLabel(item)])
+    : false;
+
   return (
     <StudentLayout>
+      {title && (
+        <h1 className="text-lg font-bold text-gray-900 mb-4">{title}</h1>
+      )}
+
       {submitted && result ? (
         <div className="text-center py-10">
           <CheckCircle size={48} className="mx-auto text-green-500 mb-4" />
@@ -111,41 +119,64 @@ export default function StudentActivityPage() {
             <div className="bg-white rounded-2xl border border-blue-100 p-6">
               <p className="font-bold text-gray-900 text-center mb-4 text-lg">{interaction.instructions}</p>
 
+              {/* Drop zones */}
               <div className="grid grid-cols-2 gap-4 mb-6">
-                {interaction.zones.map((zone) => (
-                  <div key={zone} className="border-2 border-dashed border-blue-200 rounded-xl p-3 min-h-28">
-                    <p className="text-center font-semibold text-blue-600 mb-2 text-sm">{zone}</p>
-                    <div className="space-y-1.5">
-                      {interaction.items.filter((item) => answers[item] === zone).map((item) => (
-                        <div key={item} className="bg-blue-100 text-blue-800 text-sm font-medium rounded-lg px-3 py-1.5 text-center">
-                          {item}
-                        </div>
-                      ))}
+                {interaction.zones.map((zone) => {
+                  const zoneLabel = getLabel(zone);
+                  return (
+                    <div key={zoneLabel} className="border-2 border-dashed border-blue-200 rounded-xl p-3 min-h-28">
+                      <p className="text-center font-semibold text-blue-600 mb-2 text-sm">{zoneLabel}</p>
+                      <div className="space-y-1.5">
+                        {interaction.items
+                          .filter((item) => answers[getLabel(item)] === zoneLabel)
+                          .map((item) => (
+                            <div
+                              key={getLabel(item)}
+                              onClick={() => setAnswers((prev) => {
+                                const next = { ...prev };
+                                delete next[getLabel(item)];
+                                return next;
+                              })}
+                              className="bg-blue-100 text-blue-800 text-sm font-medium rounded-lg px-3 py-1.5 text-center cursor-pointer hover:bg-blue-200"
+                              title="Clique para remover"
+                            >
+                              {getLabel(item)}
+                            </div>
+                          ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
+              {/* Unassigned items */}
               <div className="flex flex-wrap gap-2 justify-center mb-6">
-                {interaction.items.filter((item) => !answers[item]).map((item) => (
-                  <div key={item} className="relative">
-                    <p className="text-xs text-center text-gray-400 mb-1">Mover para:</p>
-                    <div className="flex gap-1">
-                      {interaction.zones.map((zone) => (
-                        <button
-                          key={zone}
-                          onClick={() => setAnswer(item, zone)}
-                          className="bg-white border border-gray-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors"
-                        >
-                          {item} → {zone}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                {interaction.items
+                  .filter((item) => !answers[getLabel(item)])
+                  .map((item) => {
+                    const itemLabel = getLabel(item);
+                    return (
+                      <div key={itemLabel}>
+                        <div className="flex gap-1">
+                          {interaction.zones.map((zone) => {
+                            const zoneLabel = getLabel(zone);
+                            return (
+                              <button
+                                key={zoneLabel}
+                                onClick={() => setAnswers((prev) => ({ ...prev, [itemLabel]: zoneLabel }))}
+                                className="bg-white border border-gray-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors"
+                              >
+                                {itemLabel} → {zoneLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
 
-              {interaction.items.every((item) => answers[item]) && (
+              {allAnswered && (
                 <button
                   onClick={handleSubmit}
                   className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl text-lg"
@@ -154,7 +185,7 @@ export default function StudentActivityPage() {
                 </button>
               )}
 
-              {Object.keys(answers).length > 0 && !interaction.items.every((item) => answers[item]) && (
+              {Object.keys(answers).length > 0 && !allAnswered && (
                 <button
                   onClick={() => setAnswers({})}
                   className="w-full border border-gray-200 text-gray-500 text-sm py-2 rounded-xl mt-2"
