@@ -1,4 +1,4 @@
-.PHONY: test test-api test-web cc lint pre-deploy up down logs
+.PHONY: test test-api test-web test-images cc lint pre-deploy up down logs
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
 test: cc test-api test-web
@@ -11,6 +11,10 @@ test-api:
 test-web:
 	@echo "=== Frontend Tests ==="
 	docker compose exec -T web npm test -- --passWithNoTests --watchAll=false
+
+test-images:
+	@echo "=== Image Generation Tests (mock DALL-E) ==="
+	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short
 
 cc:
 	@echo "=== Cyclomatic Complexity ==="

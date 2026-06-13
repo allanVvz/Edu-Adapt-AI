@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -206,12 +206,25 @@ async def reprocess_adaptation(
     return {"id": new_adaptation.id, "version": new_adaptation.version, "status": new_adaptation.status}
 
 
+class GenerateImagesRequest(BaseModel):
+    style: str = "cartoon_2d"
+
+
+class SetImageStyleRequest(BaseModel):
+    style: str
+    active_image_ids: list[str] = []
+
+
 @router.post("/{adaptation_id}/generate-images")
 async def generate_images(
     adaptation_id: str,
+    body: GenerateImagesRequest = GenerateImagesRequest(),
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
+    if body.style not in IMAGE_STYLES:
+        raise HTTPException(status_code=400, detail=f"Estilo inválido. Opções: {list(IMAGE_STYLES.keys())}")
+
     adaptation = session.get(ActivityAdaptation, adaptation_id)
     if not adaptation:
         raise HTTPException(status_code=404, detail="Adaptation not found")
@@ -221,45 +234,108 @@ async def generate_images(
         raise HTTPException(status_code=400, detail="Chave OpenAI não configurada. Acesse Configurações → Chaves de API.")
 
     from openai import AsyncOpenAI
-    client = AsyncOpenAI(api_key=openai_key)
+    import copy
+    from datetime import datetime
 
-    output = dict(adaptation.output_data or {})
-    generated = 0
+    client = AsyncOpenAI(api_key=openai_key)
+    style = body.style
+    size = IMAGE_STYLES[style]["size"]
+    output = copy.deepcopy(adaptation.output_data or {})
+    generated_count = 0
+    errors = []
 
     for img in output.get("image_options", []):
-        if img.get("image_url") or not img.get("prompt"):
+        # Skip if already generated for this style
+        already = (img.get("generated") or {}).get(style, {}).get("image_url")
+        if already:
+            continue
+        # Resolve prompt: new schema first, fallback to legacy "prompt" field
+        prompt = (img.get("prompts") or {}).get(style) or img.get("prompt", "")
+        if not prompt:
             continue
         try:
             resp = await client.images.generate(
                 model="dall-e-2",
-                prompt=img["prompt"][:1000],
-                size="512x512",
+                prompt=prompt[:1000],
+                size=size,
                 n=1,
             )
-            img["image_url"] = resp.data[0].url
-            generated += 1
-        except Exception:
-            pass
+            url = resp.data[0].url
+            if "generated" not in img or not isinstance(img["generated"], dict):
+                img["generated"] = {}
+            img["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
+            if img.get("active_style", "cartoon_2d") == style:
+                img["image_url"] = url
+            generated_count += 1
+        except Exception as e:
+            errors.append({"id": img.get("id", "?"), "error": str(e)})
 
     for interaction in output.get("interaction_options", []):
         for item in interaction.get("items", []):
             if not isinstance(item, dict):
                 continue
-            if item.get("image_url") or not item.get("image_prompt"):
+            already = (item.get("generated") or {}).get(style, {}).get("image_url")
+            if already:
+                continue
+            prompt = (item.get("prompts") or {}).get(style) or item.get("image_prompt", "")
+            if not prompt:
                 continue
             try:
                 resp = await client.images.generate(
                     model="dall-e-2",
-                    prompt=item["image_prompt"][:1000],
-                    size="256x256",
+                    prompt=prompt[:1000],
+                    size=size,
                     n=1,
                 )
-                item["image_url"] = resp.data[0].url
-                generated += 1
-            except Exception:
-                pass
+                url = resp.data[0].url
+                if "generated" not in item or not isinstance(item["generated"], dict):
+                    item["generated"] = {}
+                item["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
+                if item.get("active_style", "cartoon_2d") == style:
+                    item["image_url"] = url
+                generated_count += 1
+            except Exception as e:
+                errors.append({"id": item.get("name", "?"), "error": str(e)})
 
     adaptation.output_data = output
     session.add(adaptation)
     session.commit()
-    return {"status": "ok", "images_generated": generated}
+    return {"status": "ok", "images_generated": generated_count, "errors": errors}
+
+
+@router.post("/{adaptation_id}/image-style")
+def set_image_style(
+    adaptation_id: str,
+    body: SetImageStyleRequest,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    if body.style not in IMAGE_STYLES:
+        raise HTTPException(status_code=400, detail=f"Estilo inválido. Opções: {list(IMAGE_STYLES.keys())}")
+
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptation not found")
+
+    import copy
+    output = copy.deepcopy(adaptation.output_data or {})
+    style = body.style
+
+    for img in output.get("image_options", []):
+        img["active_style"] = style
+        img["is_active"] = img.get("id") in body.active_image_ids
+        url = (img.get("generated") or {}).get(style, {}).get("image_url")
+        img["image_url"] = url
+
+    for interaction in output.get("interaction_options", []):
+        for item in interaction.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            item["active_style"] = style
+            url = (item.get("generated") or {}).get(style, {}).get("image_url")
+            item["image_url"] = url
+
+    adaptation.output_data = output
+    session.add(adaptation)
+    session.commit()
+    return {"status": "ok"}
