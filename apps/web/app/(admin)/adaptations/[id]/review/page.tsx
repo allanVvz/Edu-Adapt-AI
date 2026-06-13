@@ -7,7 +7,7 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
   CheckCircle, XCircle, RefreshCw, Send, UserCheck,
-  ChevronDown, Loader2, Play,
+  ChevronDown, Loader2, Play, ImageIcon,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -17,8 +17,10 @@ type Tab = (typeof TABS)[number];
 // Item can be string or {name, image}
 type ActivityItem = string | { name: string; image?: string };
 type ActivityZone = string | { name: string };
-const label = (v: ActivityItem | ActivityZone): string =>
-  typeof v === "string" ? v : v.name;
+const label = (v: ActivityItem | ActivityZone): string => {
+  if (typeof v === "string") return v;
+  return v.name || (v as Record<string, string>).description || "";
+};
 
 interface AdaptationData {
   id: string;
@@ -50,6 +52,7 @@ export default function ReviewPage() {
   const [tab, setTab] = useState<Tab>("Texto");
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generatingImages, setGeneratingImages] = useState(false);
 
   // Assignment state
   const [students, setStudents] = useState<StudentItem[]>([]);
@@ -260,7 +263,28 @@ export default function ReviewPage() {
 
         {tab === "Imagens" && (
           <div>
-            <h2 className="font-semibold text-gray-700 mb-3">Opções de imagem</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-gray-700">Opções de imagem</h2>
+              <button
+                onClick={async () => {
+                  setGeneratingImages(true);
+                  try {
+                    await api.post(`/adaptations/${id}/generate-images`);
+                    toast.success("Imagens geradas!");
+                    load();
+                  } catch {
+                    toast.error("Erro ao gerar imagens. Verifique sua chave OpenAI.");
+                  } finally {
+                    setGeneratingImages(false);
+                  }
+                }}
+                disabled={generatingImages}
+                className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+              >
+                {generatingImages ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />}
+                Gerar imagens com DALL-E
+              </button>
+            </div>
             {imageOptions.length === 0 ? (
               <p className="text-gray-400 text-sm">Nenhuma opção de imagem.</p>
             ) : (
@@ -268,7 +292,11 @@ export default function ReviewPage() {
                 {imageOptions.map((img) => (
                   <div key={img.id} className="border border-gray-200 rounded-lg p-4">
                     <p className="font-medium text-sm text-gray-800 mb-1">{img.description}</p>
-                    <p className="text-xs text-gray-400 font-mono bg-gray-50 p-2 rounded">{img.prompt}</p>
+                    {(img as { image_url?: string }).image_url ? (
+                      <img src={(img as { image_url?: string }).image_url} alt={img.description} className="w-32 h-32 object-cover rounded-lg mb-2" />
+                    ) : (
+                      <p className="text-xs text-gray-400 font-mono bg-gray-50 p-2 rounded">{img.prompt}</p>
+                    )}
                   </div>
                 ))}
               </div>

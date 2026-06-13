@@ -204,3 +204,62 @@ async def reprocess_adaptation(
     session.commit()
     session.refresh(new_adaptation)
     return {"id": new_adaptation.id, "version": new_adaptation.version, "status": new_adaptation.status}
+
+
+@router.post("/{adaptation_id}/generate-images")
+async def generate_images(
+    adaptation_id: str,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptation not found")
+
+    openai_key = get_user_openai_key(session, current_user.id)
+    if not openai_key:
+        raise HTTPException(status_code=400, detail="Chave OpenAI não configurada. Acesse Configurações → Chaves de API.")
+
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=openai_key)
+
+    output = dict(adaptation.output_data or {})
+    generated = 0
+
+    for img in output.get("image_options", []):
+        if img.get("image_url") or not img.get("prompt"):
+            continue
+        try:
+            resp = await client.images.generate(
+                model="dall-e-2",
+                prompt=img["prompt"][:1000],
+                size="512x512",
+                n=1,
+            )
+            img["image_url"] = resp.data[0].url
+            generated += 1
+        except Exception:
+            pass
+
+    for interaction in output.get("interaction_options", []):
+        for item in interaction.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("image_url") or not item.get("image_prompt"):
+                continue
+            try:
+                resp = await client.images.generate(
+                    model="dall-e-2",
+                    prompt=item["image_prompt"][:1000],
+                    size="256x256",
+                    n=1,
+                )
+                item["image_url"] = resp.data[0].url
+                generated += 1
+            except Exception:
+                pass
+
+    adaptation.output_data = output
+    session.add(adaptation)
+    session.commit()
+    return {"status": "ok", "images_generated": generated}

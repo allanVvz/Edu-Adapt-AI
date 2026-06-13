@@ -3,6 +3,19 @@ from sqlmodel import Session, select
 from ..models.api_key import ApiKey
 
 
+def _detect_interaction_type(activity: dict) -> str:
+    text = " ".join([
+        (activity.get("question") or ""),
+        (activity.get("activity_type") or ""),
+        (activity.get("pedagogical_objective") or ""),
+    ]).lower()
+    if any(k in text for k in ["ordem", "ordenar", "sequência", "sequencia", "primeiro", "depois", "rotina", "passo", "etapa"]):
+        return "sequencing"
+    if any(k in text for k in ["qual é", "qual e", "quais são", "escolha", "marque", "assinale", "verdadeiro", "falso"]):
+        return "multiple_choice"
+    return "drag_and_drop"
+
+
 def _mock_adaptation(activity: dict, profile: dict) -> dict:
     title = activity.get("title") or "Atividade"
     statement = activity.get("statement") or "Observe e responda."
@@ -11,31 +24,56 @@ def _mock_adaptation(activity: dict, profile: dict) -> dict:
     modalities = profile.get("preferred_modalities") or []
     difficulties = profile.get("main_difficulties") or []
 
-    items = [w.strip() for w in expected.replace(".", ",").split(",") if w.strip()][:4]
-    if not items:
-        items = ["Item A", "Item B"]
-    zones = ["Grupo 1", "Grupo 2"]
+    interaction_type = _detect_interaction_type(activity)
+
+    raw_items = [w.strip() for w in expected.replace(".", ",").split(",") if 1 < len(w.strip()) < 40][:5]
+    if not raw_items:
+        raw_items = ["Opção A", "Opção B", "Opção C"]
+
+    items = [
+        {"name": name, "image_prompt": f"simple educational illustration of {name}, cartoon style"}
+        for name in raw_items
+    ]
+
+    if interaction_type == "sequencing":
+        zones = [{"name": f"{i+1}°"} for i in range(len(items))]
+        correct_answer = {item["name"]: f"{i+1}°" for i, item in enumerate(items)}
+        instructions = f"Coloque as etapas na ordem correta. {question}"
+    elif interaction_type == "multiple_choice":
+        items = [{"name": "Minha resposta", "image_prompt": ""}]
+        zones = [{"name": r.strip()} for r in raw_items]
+        correct_answer = {"correct_zone": zones[0]["name"]}
+        instructions = question
+    else:
+        zones = [{"name": "Grupo 1"}, {"name": "Grupo 2"}]
+        mid = len(items) // 2
+        correct_answer = {item["name"]: zones[0]["name"] for item in items[:mid]}
+        correct_answer.update({item["name"]: zones[1]["name"] for item in items[mid:]})
+        instructions = f"Arraste cada item para o grupo correto. {question}"
 
     difficulty_hint = f" Atenção às dificuldades: {', '.join(str(d) for d in difficulties)}." if difficulties else ""
     modality_hint = f" Use: {', '.join(str(m) for m in modalities)}." if modalities else ""
+
+    image_options = [
+        {"id": "img_1", "description": f"Ilustração de {title}", "prompt": f"simple educational illustration of {title}, colorful, child-friendly"},
+        {"id": "img_2", "description": "Pictograma AAC", "prompt": f"AAC pictogram for {title}, simple icon, high contrast"},
+    ]
 
     return {
         "text_adaptations": [
             {"version": 1, "content": f"{statement} {question}{difficulty_hint}{modality_hint}"}
         ],
-        "image_options": [
-            {"id": "img_1", "description": f"Ilustração de {title}", "prompt": f"illustration of {title}, simple, colorful, educational"},
-            {"id": "img_2", "description": "Pictograma AAC", "prompt": f"AAC pictogram for {title}, simple icon"},
-        ],
+        "image_options": image_options,
         "audio_options": [
             {"id": "audio_1", "script": f"{statement} {question}", "voice_style": "pausado e claro"}
         ],
         "interaction_options": [
             {
-                "type": "drag_and_drop",
-                "instructions": question,
+                "type": interaction_type,
+                "instructions": instructions,
                 "items": items,
                 "zones": zones,
+                "correct_answer": correct_answer,
                 "feedback_correct": "Muito bem!",
                 "feedback_incorrect": "Tente novamente.",
             }
@@ -111,26 +149,46 @@ Complexidade de acessibilidade: {_fmt(profile.get("accessibility_complexity"))}
 Notas adicionais: {_fmt(profile.get("notes"))}
 
 ━━━━━━━━ INSTRUÇÕES CRÍTICAS ━━━━━━━━
-1. interaction_options.items: extraia EXATAMENTE os conceitos/palavras-chave da "Resposta esperada". NUNCA use "Item 1", "Item 2" genéricos.
-2. interaction_options.zones: extraia as CATEGORIAS da "Pergunta" (ex: "em Água ou Terra" → ["Água","Terra"]). NUNCA use "Grupo A", "Grupo B" genéricos.
-3. interaction_options.instructions: use a "Pergunta" como instrução direta para o aluno.
-4. text_adaptations.content: reescreva enunciado + pergunta com linguagem adaptada ao nível de leitura do aluno.
-5. audio_options.voice_style: adapte ao nível de autonomia (low=pausado, medium=claro, high=direto).
-6. Todos os textos devem ser em português brasileiro.
+1. interaction_options[0].type: escolha o tipo correto:
+   - "sequencing": quando a atividade pede ordenar/sequenciar/colocar em ordem (rotina, cronologia, passos)
+   - "multiple_choice": quando há uma única resposta correta entre opções
+   - "drag_and_drop": para classificação em categorias (ex: animais → água ou terra)
+
+2. interaction_options[0].items: objetos {{"name": "texto do item", "image_prompt": "prompt em inglês para DALL-E"}}
+   - Extraia os conceitos da "Resposta esperada". NUNCA use "Item 1" ou "item_1" genéricos.
+   - Para "multiple_choice": items = [{{"name": "Minha resposta", "image_prompt": ""}}]
+
+3. interaction_options[0].zones: objetos {{"name": "rótulo da zona"}}
+   - Para "sequencing": zones = [{{"name": "1°"}}, {{"name": "2°"}}, ...] com N = número de itens
+   - Para "drag_and_drop": extraia as categorias da "Pergunta". NUNCA use "Grupo A/B" genéricos.
+   - Para "multiple_choice": cada zone é uma opção de resposta
+
+4. interaction_options[0].instructions: instrução direta para o aluno (baseada na pergunta)
+
+5. interaction_options[0].correct_answer: mapeamento correto item→zona
+   - drag_and_drop/sequencing: {{"nome_item": "nome_zona", ...}}
+   - multiple_choice: {{"correct_zone": "nome_da_zona_correta"}}
+
+6. text_adaptations[0].content: reescreva enunciado + pergunta adaptados ao nível de leitura do aluno.
+
+7. audio_options[0].voice_style: adapte ao nível de autonomia (low=pausado, medium=claro, high=direto).
+
+8. Todos os textos em português brasileiro. Prompts de imagem em inglês.
 
 Responda APENAS com JSON válido neste formato exato:
 {{
   "text_adaptations": [{{"version": 1, "content": "texto adaptado ao nível de leitura"}}],
   "image_options": [
-    {{"id": "img_1", "description": "descrição da imagem", "prompt": "prompt em inglês para geração"}},
+    {{"id": "img_1", "description": "descrição", "prompt": "DALL-E prompt em inglês"}},
     {{"id": "img_2", "description": "pictograma AAC", "prompt": "AAC pictogram prompt"}}
   ],
   "audio_options": [{{"id": "audio_1", "script": "roteiro completo em português", "voice_style": "estilo de voz"}}],
   "interaction_options": [{{
     "type": "drag_and_drop",
-    "instructions": "instrução direta baseada na pergunta",
-    "items": ["item1", "item2", "item3"],
-    "zones": ["categoria1", "categoria2"],
+    "instructions": "instrução direta para o aluno",
+    "items": [{{"name": "item1", "image_prompt": "prompt em inglês"}}, {{"name": "item2", "image_prompt": "prompt"}}],
+    "zones": [{{"name": "Categoria A"}}, {{"name": "Categoria B"}}],
+    "correct_answer": {{"item1": "Categoria A", "item2": "Categoria B"}},
     "feedback_correct": "Muito bem!",
     "feedback_incorrect": "Tente novamente."
   }}],

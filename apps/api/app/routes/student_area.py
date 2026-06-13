@@ -44,16 +44,34 @@ def _get_item_label(item: object) -> str:
 
 
 def _calculate_score(adaptation_output: dict, response: dict) -> tuple[float, float]:
-    max_score = 4.0
     try:
         interaction = adaptation_output.get("interaction_options", [{}])[0]
         items = interaction.get("items", [])
+        correct_answer = interaction.get("correct_answer", {})
+        interaction_type = interaction.get("type", "drag_and_drop")
+
         if not items:
             return 2.0, 4.0
+
+        max_score = float(len(items))
+
+        if interaction_type == "multiple_choice":
+            chosen = next(iter(response.values()), None)
+            correct_zone = correct_answer.get("correct_zone")
+            return (max_score if chosen == correct_zone else 0.0), max_score
+
+        if not correct_answer:
+            # No answer key: give credit for all answered items
+            labels = [_get_item_label(i) for i in items]
+            answered = sum(1 for lbl in labels if response.get(lbl) is not None)
+            return round((answered / len(labels)) * max_score, 2), max_score
+
         labels = [_get_item_label(i) for i in items]
-        correct = sum(1 for label in labels if response.get(label) is not None)
-        score = (correct / len(labels)) * max_score
-        return round(score, 2), max_score
+        correct_count = sum(
+            1 for lbl in labels
+            if response.get(lbl) is not None and response.get(lbl) == correct_answer.get(lbl)
+        )
+        return round((correct_count / len(labels)) * max_score, 2), max_score
     except Exception:
         return 2.0, 4.0
 
