@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, BookOpen, UserCircle,
-  Settings, Key, Puzzle, ChevronRight, ClipboardCheck, ShieldCheck,
+  Settings, Key, Puzzle, ChevronRight, ClipboardCheck, ShieldCheck, Images,
 } from "lucide-react";
 import { getUser, AuthUser } from "@/lib/auth";
 import UserDropdown from "./UserDropdown";
@@ -19,6 +19,7 @@ const navMain = [
   { href: "/students", label: "Alunos", icon: Users, roles: ["admin", "teacher"] as Role[] },
   { href: "/student-profiles", label: "Perfis", icon: UserCircle, roles: ["admin", "teacher"] as Role[] },
   { href: "/permissions", label: "Permissões", icon: ShieldCheck, roles: ["admin"] as Role[] },
+  { href: "/gallery", label: "Galeria", icon: Images, roles: ["admin", "teacher"] as Role[] },
 ];
 
 const navSettings = [

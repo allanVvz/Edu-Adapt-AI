@@ -11,6 +11,7 @@ from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
 from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image
+from ..models.gallery_image import GalleryImage
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -254,6 +255,19 @@ async def generate_images(
     generated_count = 0
     errors = []
 
+    def _save_to_gallery(url: str, description: str, prompt: str) -> None:
+        gallery_img = GalleryImage(
+            image_url=url,
+            description=description,
+            source="generated",
+            style=style,
+            prompt=prompt[:500] if prompt else None,
+            activity_id=adaptation.activity_id,
+            adaptation_id=adaptation.id,
+            user_id=current_user.id,
+        )
+        session.add(gallery_img)
+
     for img in output.get("image_options", []):
         already = (img.get("generated") or {}).get(style, {}).get("image_url")
         if already:
@@ -274,6 +288,7 @@ async def generate_images(
             img["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
             if img.get("active_style", "cartoon_2d") == style:
                 img["image_url"] = url
+            _save_to_gallery(url, img.get("description", "Imagem da atividade"), prompt)
             generated_count += 1
         except Exception as e:
             errors.append({"id": img.get("id", "?"), "error": _parse_image_error(str(e), openai_key)})
@@ -301,6 +316,7 @@ async def generate_images(
                 item["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
                 if item.get("active_style", "cartoon_2d") == style:
                     item["image_url"] = url
+                _save_to_gallery(url, item.get("name", "Item de interação"), prompt)
                 generated_count += 1
             except Exception as e:
                 errors.append({"id": item.get("name", "?"), "error": _parse_image_error(str(e), openai_key)})
@@ -309,6 +325,172 @@ async def generate_images(
     session.add(adaptation)
     session.commit()
     return {"status": "ok", "images_generated": generated_count, "errors": errors}
+
+
+class ApplyGalleryImageRequest(BaseModel):
+    slot_type: str  # "image_option" | "interaction_item"
+    slot_id: str
+    image_url: str
+    gallery_image_id: Optional[str] = None
+
+
+@router.post("/{adaptation_id}/apply-gallery-image")
+def apply_gallery_image(
+    adaptation_id: str,
+    body: ApplyGalleryImageRequest,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptation not found")
+
+    import copy
+    output = copy.deepcopy(adaptation.output_data or {})
+
+    if body.slot_type == "image_option":
+        for img in output.get("image_options", []):
+            if img.get("id") == body.slot_id:
+                img["image_url"] = body.image_url
+                active_style = img.get("active_style", "cartoon_2d")
+                if "generated" not in img or not isinstance(img.get("generated"), dict):
+                    img["generated"] = {}
+                if active_style not in img["generated"] or not isinstance(img["generated"].get(active_style), dict):
+                    img["generated"][active_style] = {}
+                img["generated"][active_style]["image_url"] = body.image_url
+                break
+
+    elif body.slot_type == "interaction_item":
+        for interaction in output.get("interaction_options", []):
+            for item in interaction.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("name") == body.slot_id:
+                    item["image_url"] = body.image_url
+                    active_style = item.get("active_style", "cartoon_2d")
+                    if "generated" not in item or not isinstance(item.get("generated"), dict):
+                        item["generated"] = {}
+                    if active_style not in item["generated"] or not isinstance(item["generated"].get(active_style), dict):
+                        item["generated"][active_style] = {}
+                    item["generated"][active_style]["image_url"] = body.image_url
+                    break
+
+    adaptation.output_data = output
+    session.add(adaptation)
+    session.commit()
+    return {"status": "ok"}
+
+
+class RegenerateImageRequest(BaseModel):
+    slot_type: str  # "image_option" | "interaction_item"
+    slot_id: str
+    style: str = "cartoon_2d"
+    feedback: str = ""
+
+
+@router.post("/{adaptation_id}/regenerate-image")
+async def regenerate_image(
+    adaptation_id: str,
+    body: RegenerateImageRequest,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    if body.style not in IMAGE_STYLES:
+        raise HTTPException(status_code=400, detail=f"Estilo inválido: {body.style}")
+
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptation not found")
+
+    openai_key = get_user_openai_key(session, current_user.id)
+    if not openai_key:
+        raise HTTPException(status_code=400, detail="Chave OpenAI não configurada.")
+
+    import copy
+    from openai import AsyncOpenAI
+    from datetime import datetime
+
+    style_cfg = IMAGE_STYLES[body.style]
+    model = style_cfg["model"]
+    size = style_cfg["size"]
+    output = copy.deepcopy(adaptation.output_data or {})
+
+    # Find original prompt and slot
+    base_prompt = ""
+    description = ""
+
+    if body.slot_type == "image_option":
+        for img in output.get("image_options", []):
+            if img.get("id") == body.slot_id:
+                base_prompt = (img.get("prompts") or {}).get(body.style) or img.get("prompt", "")
+                description = img.get("description", "Imagem da atividade")
+                break
+    elif body.slot_type == "interaction_item":
+        for interaction in output.get("interaction_options", []):
+            for item in interaction.get("items", []):
+                if isinstance(item, dict) and item.get("name") == body.slot_id:
+                    base_prompt = (item.get("prompts") or {}).get(body.style) or item.get("image_prompt", "")
+                    description = item.get("name", "Item de interação")
+                    break
+
+    if not base_prompt:
+        raise HTTPException(status_code=400, detail="Prompt base não encontrado para esse slot.")
+
+    # Combine base prompt with feedback modifier
+    feedback_trimmed = body.feedback.strip()
+    modified_prompt = f"{base_prompt}. {feedback_trimmed}" if feedback_trimmed else base_prompt
+
+    client = AsyncOpenAI(api_key=openai_key)
+    try:
+        resp = await client.images.generate(
+            model=model,
+            prompt=modified_prompt[:1000],
+            size=size,
+            n=1,
+        )
+        url = _save_image(resp.data[0])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=_parse_image_error(str(e), openai_key))
+
+    # Save new image to gallery
+    gallery_img = GalleryImage(
+        image_url=url,
+        description=f"{description} (feedback: {feedback_trimmed})" if feedback_trimmed else description,
+        source="generated",
+        style=body.style,
+        prompt=modified_prompt[:500],
+        activity_id=adaptation.activity_id,
+        adaptation_id=adaptation.id,
+        user_id=current_user.id,
+    )
+    session.add(gallery_img)
+
+    # Update slot
+    now_iso = datetime.utcnow().isoformat()
+    if body.slot_type == "image_option":
+        for img in output.get("image_options", []):
+            if img.get("id") == body.slot_id:
+                if "generated" not in img or not isinstance(img.get("generated"), dict):
+                    img["generated"] = {}
+                img["generated"][body.style] = {"image_url": url, "generated_at": now_iso}
+                if img.get("active_style", "cartoon_2d") == body.style:
+                    img["image_url"] = url
+                break
+    elif body.slot_type == "interaction_item":
+        for interaction in output.get("interaction_options", []):
+            for item in interaction.get("items", []):
+                if isinstance(item, dict) and item.get("name") == body.slot_id:
+                    if "generated" not in item or not isinstance(item.get("generated"), dict):
+                        item["generated"] = {}
+                    item["generated"][body.style] = {"image_url": url, "generated_at": now_iso}
+                    if item.get("active_style", "cartoon_2d") == body.style:
+                        item["image_url"] = url
+                    break
+
+    adaptation.output_data = output
+    session.add(adaptation)
+    session.commit()
+    return {"status": "ok", "image_url": url, "gallery_image_id": gallery_img.id}
 
 
 @router.post("/{adaptation_id}/image-style")

@@ -6,6 +6,7 @@ from .adaptation import ActivityAdaptation
 from .attempt import StudentActivityAttempt
 from .api_key import ApiKey
 from .agent_run import AgentRun
+from .gallery_image import GalleryImage
 
 __all__ = [
     "User",
@@ -17,4 +18,5 @@ __all__ = [
     "StudentActivityAttempt",
     "ApiKey",
     "AgentRun",
+    "GalleryImage",
 ]

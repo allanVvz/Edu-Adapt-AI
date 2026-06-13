@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AdminLayout from "@/components/layout/AdminLayout";
+import ImagePickerModal from "@/components/ImagePickerModal";
 import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
   CheckCircle, XCircle, RefreshCw, Send, UserCheck,
-  ChevronDown, Loader2, Play, ImageIcon,
+  ChevronDown, Loader2, Play, ImageIcon, Images, RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -36,7 +37,6 @@ interface ImageOption {
   active_style?: ImageStyle;
   is_active?: boolean;
   image_url?: string | null;
-  // legacy
   prompt?: string;
 }
 
@@ -57,6 +57,13 @@ interface AdaptationData {
 interface StudentItem { id: string; name: string; email: string }
 interface TeacherItem { id: string; name: string; email: string; role: string }
 
+// A slot reference used for picker + regen
+interface SlotRef {
+  slot_type: "image_option" | "interaction_item";
+  slot_id: string;
+  current_url?: string | null;
+}
+
 export default function ReviewPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -66,12 +73,21 @@ export default function ReviewPage() {
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Image management state
+  // Image management
   const [activeStyle, setActiveStyle] = useState<ImageStyle>("cartoon_2d");
   const [generatingStyle, setGeneratingStyle] = useState<ImageStyle | null>(null);
   const [applyingStyle, setApplyingStyle] = useState(false);
 
-  // Assignment state
+  // Gallery picker
+  const [pickerSlot, setPickerSlot] = useState<SlotRef | null>(null);
+  const [applyingPick, setApplyingPick] = useState(false);
+
+  // Per-image regeneration
+  const [regenSlot, setRegenSlot] = useState<SlotRef | null>(null);
+  const [regenFeedback, setRegenFeedback] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+
+  // Assignment
   const [students, setStudents] = useState<StudentItem[]>([]);
   const [teachers, setTeachers] = useState<TeacherItem[]>([]);
   const [assignStudentId, setAssignStudentId] = useState("");
@@ -99,7 +115,6 @@ export default function ReviewPage() {
       setData(d);
       setAssignStudentId(d.student_id || "");
       setAssignTeacherId(d.activity?.teacher_id || "");
-      // Initialize image state from loaded data
       const imgs = (d.output?.image_options as ImageOption[]) || [];
       const firstStyle = imgs[0]?.active_style;
       if (firstStyle) setActiveStyle(firstStyle);
@@ -144,7 +159,7 @@ export default function ReviewPage() {
         const first = errs[0] as { error: string };
         toast.error(first.error, { duration: 10000 });
       } else {
-        toast.success(`Imagens ${STYLE_LABELS[style]} geradas!`);
+        toast.success(`Imagens ${STYLE_LABELS[style]} geradas e salvas na galeria!`);
       }
       load();
     } catch (e: unknown) {
@@ -168,6 +183,48 @@ export default function ReviewPage() {
       toast.error("Erro ao aplicar estilo.");
     } finally {
       setApplyingStyle(false);
+    }
+  }
+
+  async function handlePickerSelect(imageUrl: string, _galleryImageId: string) {
+    if (!pickerSlot) return;
+    setApplyingPick(true);
+    try {
+      await api.post(`/adaptations/${id}/apply-gallery-image`, {
+        slot_type: pickerSlot.slot_type,
+        slot_id: pickerSlot.slot_id,
+        image_url: imageUrl,
+        gallery_image_id: _galleryImageId,
+      });
+      toast.success("Imagem substituída com sucesso!");
+      load();
+    } catch {
+      toast.error("Erro ao substituir imagem.");
+    } finally {
+      setApplyingPick(false);
+      setPickerSlot(null);
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!regenSlot) return;
+    setRegenerating(true);
+    try {
+      await api.post(`/adaptations/${id}/regenerate-image`, {
+        slot_type: regenSlot.slot_type,
+        slot_id: regenSlot.slot_id,
+        style: activeStyle,
+        feedback: regenFeedback,
+      });
+      toast.success("Nova imagem gerada e salva na galeria!");
+      setRegenSlot(null);
+      setRegenFeedback("");
+      load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Erro ao regenerar imagem.");
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -219,7 +276,6 @@ export default function ReviewPage() {
   const previewText = textAdaptations[0]?.content;
   const previewAudio = audioOptions[0];
 
-  // Interaction items (for image generation list)
   const interactionItems = interactionOptions.flatMap((io) =>
     (io.items || []).filter((it) => typeof it !== "string" && (it as ImageOption).name)
       .map((it) => it as unknown as ImageOption & { name: string })
@@ -227,8 +283,108 @@ export default function ReviewPage() {
 
   const visualImages = imageOptions.filter((img) => img.is_active && img.image_url);
 
+  // Helper: renders image card with click-to-pick and regen controls
+  function ImageCard({
+    slotType, slotId, imageUrl, title, isSmall = false,
+  }: {
+    slotType: "image_option" | "interaction_item";
+    slotId: string;
+    imageUrl: string | null | undefined;
+    title: string;
+    isSmall?: boolean;
+  }) {
+    const isRegen = regenSlot?.slot_type === slotType && regenSlot?.slot_id === slotId;
+    return (
+      <div className="border border-gray-200 rounded-xl p-3 bg-white">
+        {/* Thumbnail — click to open gallery picker */}
+        <div
+          className={clsx(
+            "w-full rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2 cursor-pointer group relative",
+            isSmall ? "h-20" : "aspect-square"
+          )}
+          onClick={() => setPickerSlot({ slot_type: slotType, slot_id: slotId, current_url: imageUrl })}
+          title="Clique para escolher outra imagem da galeria"
+        >
+          {imageUrl ? (
+            <>
+              <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded-lg px-2 py-1 flex items-center gap-1 text-xs text-gray-700 font-medium">
+                  <Images size={11} /> Trocar
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center text-gray-300 group-hover:text-blue-400 transition-colors">
+              <ImageIcon size={isSmall ? 20 : 28} className="mx-auto" />
+              <p className="text-xs mt-1">Escolher</p>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs font-medium text-gray-700 text-center">{title}</p>
+        {imageUrl && <p className="text-xs text-green-600 text-center mt-0.5">✓ Gerado</p>}
+
+        {/* Regen toggle */}
+        {!isRegen ? (
+          <button
+            onClick={() => { setRegenSlot({ slot_type: slotType, slot_id: slotId }); setRegenFeedback(""); }}
+            className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-gray-500 hover:text-purple-600 border border-gray-200 hover:border-purple-300 rounded-lg py-1 transition-colors"
+          >
+            <RotateCcw size={10} /> Refazer
+          </button>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <textarea
+              value={regenFeedback}
+              onChange={(e) => setRegenFeedback(e.target.value)}
+              rows={2}
+              placeholder="Ex: peixe visto de longe, ângulo distante, peixe menor na água..."
+              className="w-full text-xs border border-purple-300 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-purple-400"
+              autoFocus
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={handleRegenerate}
+                disabled={regenerating}
+                className="flex-1 flex items-center justify-center gap-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg py-1.5 font-medium"
+              >
+                {regenerating ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+                {regenerating ? "Gerando..." : "Regenerar"}
+              </button>
+              <button
+                onClick={() => setRegenSlot(null)}
+                className="text-xs text-gray-400 hover:text-gray-600 px-2 border border-gray-200 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <AdminLayout>
+      {/* Gallery picker modal */}
+      <ImagePickerModal
+        open={!!pickerSlot}
+        onClose={() => setPickerSlot(null)}
+        onSelect={handlePickerSelect}
+        currentImageUrl={pickerSlot?.current_url}
+      />
+
+      {/* Applying overlay */}
+      {applyingPick && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20">
+          <div className="bg-white rounded-xl px-6 py-4 shadow-lg flex items-center gap-3">
+            <Loader2 size={18} className="animate-spin text-blue-600" />
+            <p className="text-sm font-medium">Substituindo imagem...</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
@@ -347,7 +503,7 @@ export default function ReviewPage() {
         {tab === "Imagens" && (
           <div>
             {/* Style selector + Gerar buttons */}
-            <div className="flex flex-wrap items-center gap-3 mb-6">
+            <div className="flex flex-wrap items-center gap-3 mb-5">
               <h2 className="font-semibold text-gray-700">Estilo:</h2>
               {(Object.keys(STYLE_LABELS) as ImageStyle[]).map((style) => (
                 <div key={style} className="flex items-center gap-2">
@@ -372,69 +528,60 @@ export default function ReviewPage() {
                   </button>
                 </div>
               ))}
+              <div className="ml-auto">
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <Images size={11} /> Clique em uma imagem para trocar pela galeria
+                </p>
+              </div>
             </div>
 
             {imageOptions.length === 0 && interactionItems.length === 0 ? (
               <p className="text-gray-400 text-sm">Nenhuma imagem disponível. Regenere a adaptação.</p>
             ) : (
               <>
-                {/* Image options grid */}
                 {imageOptions.length > 0 && (
                   <div className="mb-6">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Imagens da atividade</p>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {imageOptions.map((img) => {
                         const generatedEntry = img.generated?.[activeStyle];
-                        const hasGenerated = !!generatedEntry?.image_url;
+                        const imageUrl = generatedEntry?.image_url || img.image_url || null;
                         return (
-                          <div key={img.id} className="border border-gray-200 rounded-xl p-3 bg-white">
-                            <div className="w-full aspect-square rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2">
-                              {hasGenerated ? (
-                                <img src={generatedEntry!.image_url!} alt={img.description} className="w-full h-full object-cover" />
-                              ) : (
-                                <ImageIcon size={28} className="text-gray-300" />
-                              )}
-                            </div>
-                            <p className="text-xs font-medium text-gray-700 text-center">{img.description}</p>
-                            {hasGenerated && (
-                              <p className="text-xs text-green-600 text-center mt-1">✓ Gerado</p>
-                            )}
-                          </div>
+                          <ImageCard
+                            key={img.id}
+                            slotType="image_option"
+                            slotId={img.id}
+                            imageUrl={imageUrl}
+                            title={img.description}
+                          />
                         );
                       })}
                     </div>
                   </div>
                 )}
 
-                {/* Interaction items grid */}
                 {interactionItems.length > 0 && (
                   <div className="mb-6">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Itens da interação</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {interactionItems.map((item) => {
                         const generatedEntry = (item as unknown as ImageOption).generated?.[activeStyle];
-                        const hasGenerated = !!generatedEntry?.image_url;
+                        const imageUrl = generatedEntry?.image_url || (item as unknown as ImageOption).image_url || null;
                         return (
-                          <div key={item.name} className="border border-gray-200 rounded-xl p-3 bg-white">
-                            <div className="w-full h-20 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2">
-                              {hasGenerated ? (
-                                <img src={generatedEntry!.image_url!} alt={item.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <ImageIcon size={20} className="text-gray-300" />
-                              )}
-                            </div>
-                            <p className="text-xs font-medium text-gray-700 text-center">{item.name}</p>
-                            {hasGenerated && (
-                              <p className="text-xs text-green-600 text-center mt-1">✓ Gerado</p>
-                            )}
-                          </div>
+                          <ImageCard
+                            key={item.name}
+                            slotType="interaction_item"
+                            slotId={item.name}
+                            imageUrl={imageUrl}
+                            title={item.name}
+                            isSmall
+                          />
                         );
                       })}
                     </div>
                   </div>
                 )}
 
-                {/* Apply button */}
                 <div className="border-t border-gray-100 pt-4">
                   <button
                     onClick={applyImageStyle}

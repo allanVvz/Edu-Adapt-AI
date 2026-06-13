@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from .config import settings
-from .routes import auth, settings as settings_router, students, profiles, activities, adaptations, student_area, dashboard, admin
+from .routes import auth, settings as settings_router, students, profiles, activities, adaptations, student_area, dashboard, admin, gallery
 
 app = FastAPI(
     title="EduAdapt AI",
@@ -31,6 +31,7 @@ app.include_router(adaptations.router)
 app.include_router(student_area.router)
 app.include_router(dashboard.router)
 app.include_router(admin.router)
+app.include_router(gallery.router)
 
 
 @app.get("/health")
