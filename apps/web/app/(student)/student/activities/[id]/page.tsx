@@ -141,6 +141,7 @@ function DragAndDrop({
 }
 
 // ─── Sequencing ───────────────────────────────────────────────────────────────
+// Tap items in the correct order — each tap assigns the next position.
 function Sequencing({
   interaction,
   answers,
@@ -152,61 +153,84 @@ function Sequencing({
   feedback: Record<string, "correct" | "incorrect">;
   onAnswer: (itemLabel: string, zoneLabel: string | null) => void;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const zones = interaction.zones;
+
+  // Items already ordered, sorted by their zone index
+  const ordered = interaction.items
+    .filter((item) => answers[getLabel(item)])
+    .sort((a, b) => {
+      const ia = zones.findIndex((z) => getLabel(z) === answers[getLabel(a)]);
+      const ib = zones.findIndex((z) => getLabel(z) === answers[getLabel(b)]);
+      return ia - ib;
+    });
+
+  const unplaced = interaction.items.filter((item) => !answers[getLabel(item)]);
+
+  const handleTap = (item: ActivityItem) => {
+    const nextZone = zones[ordered.length];
+    if (nextZone) onAnswer(getLabel(item), getLabel(nextZone));
+  };
+
+  const handleReset = () => {
+    interaction.items.forEach((item) => onAnswer(getLabel(item), null));
+  };
 
   return (
     <>
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-5 justify-center flex-wrap">
-        {interaction.zones.map((zone) => {
-          const zoneLabel = getLabel(zone);
-          const placed = interaction.items.find((i) => answers[getLabel(i)] === zoneLabel);
-          return (
-            <div key={zoneLabel} className="flex flex-col items-center gap-1 flex-shrink-0">
-              <p className="text-xs font-bold text-blue-600">{zoneLabel}</p>
-              <div
-                className={clsx(
-                  "w-24 h-28 border-2 rounded-xl flex items-center justify-center transition-colors",
-                  placed ? "border-blue-300 bg-white" : "border-dashed border-blue-200 bg-blue-50/30",
-                  selected && !placed && "border-blue-400 bg-blue-50 cursor-pointer hover:bg-blue-100",
-                )}
-                onClick={() => {
-                  if (selected && !placed) {
-                    onAnswer(selected, zoneLabel);
-                    setSelected(null);
-                  }
-                }}
-              >
-                {placed ? (
-                  <ItemCard item={placed} feedback={feedback[getLabel(placed)]} className="w-full h-full border-0" />
-                ) : (
-                  <span className="text-2xl text-blue-200 font-bold">{zoneLabel}</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <p className="text-center text-xs text-gray-500 mb-3">
-        {selected ? `Toque num slot para colocar "${selected}"` : "Toque num item para selecionar"}
-      </p>
-
-      <div className="flex flex-wrap gap-2 justify-center mb-4">
-        {interaction.items
-          .filter((item) => !answers[getLabel(item)])
-          .map((item) => {
-            const itemLabel = getLabel(item);
-            const isSelected = selected === itemLabel;
+      {/* Sequence built so far */}
+      {ordered.length > 0 && (
+        <div className="space-y-2 mb-4">
+          {ordered.map((item, idx) => {
+            const lbl = getLabel(item);
+            const fb = feedback[lbl];
             return (
-              <ItemCard
-                key={itemLabel}
-                item={item}
-                onClick={() => setSelected(isSelected ? null : itemLabel)}
-                className={clsx("w-24", isSelected && "border-blue-500 bg-blue-100 ring-2 ring-blue-400")}
-              />
+              <div
+                key={lbl}
+                className={clsx(
+                  "flex items-center gap-3 rounded-xl border-2 px-4 py-3",
+                  fb === "correct" && "border-green-400 bg-green-50",
+                  fb === "incorrect" && "border-red-400 bg-red-50",
+                  !fb && "border-blue-200 bg-white",
+                )}
+              >
+                <span className="text-lg font-bold text-blue-600 w-7 text-center">{idx + 1}°</span>
+                <span className="font-medium text-gray-800">{lbl}</span>
+                {fb === "correct" && <span className="ml-auto text-green-600 text-sm font-bold">✓</span>}
+                {fb === "incorrect" && <span className="ml-auto text-red-500 text-sm font-bold">✗</span>}
+              </div>
             );
           })}
-      </div>
+        </div>
+      )}
+
+      {/* Items still to place */}
+      {unplaced.length > 0 && (
+        <>
+          <p className="text-center text-sm text-gray-500 mb-3">
+            Toque no item que vem em <strong>{ordered.length + 1}° lugar</strong>
+          </p>
+          <div className="flex flex-wrap gap-2 justify-center mb-4">
+            {unplaced.map((item) => (
+              <ItemCard
+                key={getLabel(item)}
+                item={item}
+                onClick={() => handleTap(item)}
+                className="w-32"
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Reset */}
+      {ordered.length > 0 && !Object.keys(feedback).length && (
+        <button
+          onClick={handleReset}
+          className="w-full flex items-center justify-center gap-2 border border-gray-200 text-gray-500 text-sm py-2 rounded-xl mt-1 hover:bg-gray-50"
+        >
+          <RotateCcw size={13} /> Recomeçar
+        </button>
+      )}
     </>
   );
 }
@@ -362,7 +386,7 @@ export default function StudentActivityPage() {
                 return (
                   <div key={lbl} className={clsx("flex items-center justify-between rounded-lg px-4 py-2 text-sm", fb === "correct" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
                     <span className="font-medium">{lbl}</span>
-                    <span className="text-xs">{fb === "correct" ? "✓ correto" : `✗ era "${correct}"`}</span>
+                    <span className="text-xs">{fb === "correct" ? "✓ correto" : correct ? `✗ era "${correct}"` : "✗ incorreto"}</span>
                   </div>
                 );
               })}
@@ -417,7 +441,7 @@ export default function StudentActivityPage() {
                 </button>
               )}
 
-              {Object.keys(answers).length > 0 && !allAnswered && !submitted && (
+              {Object.keys(answers).length > 0 && !allAnswered && !submitted && interaction.type !== "sequencing" && (
                 <button
                   onClick={() => setAnswers({})}
                   className="w-full flex items-center justify-center gap-2 border border-gray-200 text-gray-500 text-sm py-2 rounded-xl mt-2 hover:bg-gray-50"
