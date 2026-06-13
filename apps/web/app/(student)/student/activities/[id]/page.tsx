@@ -31,10 +31,18 @@ interface InteractionOption {
   feedback_incorrect?: string;
 }
 
+interface ImageOption {
+  id: string;
+  description: string;
+  is_active?: boolean;
+  image_url?: string | null;
+}
+
 interface OutputData {
   text_adaptations?: Array<{ version: number; content: string }>;
   audio_options?: Array<{ id?: string; script: string; voice_style: string }>;
   interaction_options?: InteractionOption[];
+  image_options?: ImageOption[];
 }
 
 // ─── Item card (shared across interaction types) ──────────────────────────────
@@ -355,6 +363,7 @@ export default function StudentActivityPage() {
   const text = output.text_adaptations?.[0]?.content;
   const audio = output.audio_options?.[0];
   const interaction = output.interaction_options?.[0];
+  const visualImages = (output.image_options ?? []).filter((img) => img.is_active && img.image_url);
 
   const allAnswered = interaction
     ? interaction.items.every((item) => answers[getLabel(item)])
@@ -400,6 +409,21 @@ export default function StudentActivityPage() {
         </div>
       ) : (
         <div>
+          {visualImages.length > 0 && (
+            <div className="flex gap-3 overflow-x-auto mb-4 pb-1">
+              {visualImages.map((img) => (
+                <div key={img.id} className="flex-shrink-0 text-center">
+                  <img
+                    src={img.image_url!}
+                    alt={img.description}
+                    className="w-36 h-36 object-cover rounded-xl border border-blue-100 shadow-sm"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">{img.description}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {text && (
             <div className="bg-white rounded-2xl border border-blue-100 p-6 mb-4">
               <pre className="text-base text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">{text}</pre>
