@@ -37,7 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const role = user?.role as Role | undefined;
 
-  function NavLink({ href, label, icon: Icon }: { href: string; label: string; icon: React.ComponentType<{ size?: number }> }) {
+  function NavLink({ href, label, icon: Icon }: { href: string; label: string; icon: React.ComponentType<{ size?: number | string }> }) {
     return (
       <Link
         href={href}

@@ -25,7 +25,7 @@ interface DashboardData {
 }
 
 function StatCard({ label, value, icon: Icon, color }: {
-  label: string; value: number | string; icon: React.ComponentType<{ size?: number }>; color: string;
+  label: string; value: number | string; icon: React.ComponentType<{ size?: number | string }>; color: string;
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 flex items-start gap-4">

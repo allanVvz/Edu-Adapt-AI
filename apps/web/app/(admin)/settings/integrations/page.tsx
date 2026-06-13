@@ -148,7 +148,7 @@ export default function IntegrationsPage() {
             { key: "projectId", label: "Project ID", placeholder: "prj_..." },
             { key: "teamId", label: "Team ID (opcional)", placeholder: "team_..." },
             { key: "deployHookUrl", label: "Deploy Hook URL (opcional)", placeholder: "https://api.vercel.com/v1/integrations/deploy/..." },
-          ] as const).map(({ key, label, placeholder, type }) => (
+          ] as Array<{ key: keyof VercelConfig; label: string; placeholder: string; type?: string }>).map(({ key, label, placeholder, type }) => (
             <div key={key}>
               <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
               <input
