@@ -8,14 +8,19 @@ IMAGE_STYLES: dict[str, dict] = {
     "line_art": {
         "label": "Desenho P&B — traços simples",
         "suffix": "simple black and white line drawing, educational, minimal clean lines, no color, sketch style, high contrast",
-        "size": "256x256",
+        "model": "dall-e-3",
+        "size": "1024x1024",
     },
     "cartoon_2d": {
         "label": "Cartoon colorido — detalhes 2D",
         "suffix": "colorful 2D cartoon illustration, child-friendly, vibrant colors, simple shapes, cute small details, educational",
-        "size": "512x512",
+        "model": "dall-e-3",
+        "size": "1024x1024",
     },
 }
+
+# Models that exist in the OpenAI API as of 2025 (dall-e-2 was deprecated)
+VALID_IMAGE_MODELS = {"dall-e-3", "gpt-image-1"}
 
 
 def _make_prompts(subject: str) -> dict:

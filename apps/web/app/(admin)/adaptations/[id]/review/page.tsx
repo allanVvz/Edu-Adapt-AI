@@ -68,8 +68,7 @@ export default function ReviewPage() {
 
   // Image management state
   const [activeStyle, setActiveStyle] = useState<ImageStyle>("cartoon_2d");
-  const [activeImageIds, setActiveImageIds] = useState<Set<string>>(new Set());
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [generatingStyle, setGeneratingStyle] = useState<ImageStyle | null>(null);
   const [applyingStyle, setApplyingStyle] = useState(false);
 
   // Assignment state
@@ -102,7 +101,6 @@ export default function ReviewPage() {
       setAssignTeacherId(d.activity?.teacher_id || "");
       // Initialize image state from loaded data
       const imgs = (d.output?.image_options as ImageOption[]) || [];
-      setActiveImageIds(new Set(imgs.filter((i) => i.is_active).map((i) => i.id)));
       const firstStyle = imgs[0]?.active_style;
       if (firstStyle) setActiveStyle(firstStyle);
     } catch {
@@ -137,22 +135,22 @@ export default function ReviewPage() {
     }
   }
 
-  async function generateImageForStyle(imageId: string) {
-    setGeneratingId(imageId);
+  async function generateImagesForStyle(style: ImageStyle) {
+    setGeneratingStyle(style);
     try {
-      const result = await api.post(`/adaptations/${id}/generate-images`, { style: activeStyle });
+      const result = await api.post(`/adaptations/${id}/generate-images`, { style });
       const errs = result.data?.errors ?? [];
       if (errs.length > 0) {
         toast.error(`Alguns erros: ${errs.map((e: { error: string }) => e.error).join(", ")}`);
       } else {
-        toast.success("Imagem gerada!");
+        toast.success(`Imagens ${STYLE_LABELS[style]} geradas!`);
       }
       load();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(msg || "Erro ao gerar imagem. Verifique sua chave OpenAI.");
+      toast.error(msg || "Erro ao gerar imagens. Verifique sua chave OpenAI.");
     } finally {
-      setGeneratingId(null);
+      setGeneratingStyle(null);
     }
   }
 
@@ -161,9 +159,9 @@ export default function ReviewPage() {
     try {
       await api.post(`/adaptations/${id}/image-style`, {
         style: activeStyle,
-        active_image_ids: [...activeImageIds],
+        active_image_ids: imageOptions.map((img) => img.id),
       });
-      toast.success("Estilo e seleção aplicados!");
+      toast.success(`Estilo "${STYLE_LABELS[activeStyle]}" aplicado!`);
       load();
     } catch {
       toast.error("Erro ao aplicar estilo.");
@@ -325,7 +323,7 @@ export default function ReviewPage() {
             {visualImages.length === 0 ? (
               <div className="text-center py-10 text-gray-400 text-sm">
                 <ImageIcon size={32} className="mx-auto mb-2 opacity-30" />
-                <p>Nenhuma imagem ativa. Gere imagens na aba "Imagens" e marque-as como ativas.</p>
+                <p>Nenhuma imagem ativa. Gere imagens na aba "Imagens" e clique em "Aplicar".</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -347,13 +345,12 @@ export default function ReviewPage() {
 
         {tab === "Imagens" && (
           <div>
-            {/* Style selector */}
-            <div className="flex items-center gap-3 mb-5">
+            {/* Style selector + Gerar buttons */}
+            <div className="flex flex-wrap items-center gap-3 mb-6">
               <h2 className="font-semibold text-gray-700">Estilo:</h2>
-              <div className="flex gap-2">
-                {(Object.keys(STYLE_LABELS) as ImageStyle[]).map((style) => (
+              {(Object.keys(STYLE_LABELS) as ImageStyle[]).map((style) => (
+                <div key={style} className="flex items-center gap-2">
                   <button
-                    key={style}
                     onClick={() => setActiveStyle(style)}
                     className={clsx(
                       "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
@@ -364,76 +361,43 @@ export default function ReviewPage() {
                   >
                     {STYLE_LABELS[style]}
                   </button>
-                ))}
-              </div>
+                  <button
+                    onClick={() => generateImagesForStyle(style)}
+                    disabled={!!generatingStyle}
+                    className="flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 disabled:opacity-50 text-purple-700 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200"
+                  >
+                    {generatingStyle === style ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />}
+                    Gerar
+                  </button>
+                </div>
+              ))}
             </div>
 
             {imageOptions.length === 0 && interactionItems.length === 0 ? (
               <p className="text-gray-400 text-sm">Nenhuma imagem disponível. Regenere a adaptação.</p>
             ) : (
               <>
-                {/* Image options list */}
+                {/* Image options grid */}
                 {imageOptions.length > 0 && (
                   <div className="mb-6">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Imagens da atividade</p>
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {imageOptions.map((img) => {
                         const generatedEntry = img.generated?.[activeStyle];
                         const hasGenerated = !!generatedEntry?.image_url;
-                        const isGenerating = generatingId === img.id;
-                        const prompt = img.prompts?.[activeStyle] || img.prompt || "";
-                        const isActive = activeImageIds.has(img.id);
-
                         return (
-                          <div key={img.id}
-                            className={clsx(
-                              "flex gap-4 p-4 rounded-xl border-2 transition-colors",
-                              isActive ? "border-purple-200 bg-purple-50/30" : "border-gray-100 bg-gray-50/30"
-                            )}>
-                            {/* Checkbox */}
-                            <div className="flex items-start pt-1">
-                              <input
-                                type="checkbox"
-                                checked={isActive}
-                                onChange={(e) => {
-                                  const next = new Set(activeImageIds);
-                                  if (e.target.checked) next.add(img.id);
-                                  else next.delete(img.id);
-                                  setActiveImageIds(next);
-                                }}
-                                className="w-4 h-4 accent-purple-600 cursor-pointer"
-                              />
-                            </div>
-
-                            {/* Thumbnail */}
-                            <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
+                          <div key={img.id} className="border border-gray-200 rounded-xl p-3 bg-white">
+                            <div className="w-full aspect-square rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2">
                               {hasGenerated ? (
                                 <img src={generatedEntry!.image_url!} alt={img.description} className="w-full h-full object-cover" />
                               ) : (
-                                <ImageIcon size={24} className="text-gray-300" />
+                                <ImageIcon size={28} className="text-gray-300" />
                               )}
                             </div>
-
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm text-gray-800 mb-1">{img.description}</p>
-                              <p className="text-xs text-gray-400 font-mono truncate mb-2">{prompt}</p>
-                              {hasGenerated ? (
-                                <div className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
-                                  <CheckCircle size={12} />
-                                  Gerado — para regenerar, adicione feedback e reprocesse
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => generateImageForStyle(img.id)}
-                                  disabled={!!generatingId}
-                                  className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
-                                >
-                                  {isGenerating ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />}
-                                  Gerar {STYLE_LABELS[activeStyle]}
-                                </button>
-                              )}
-                            </div>
+                            <p className="text-xs font-medium text-gray-700 text-center">{img.description}</p>
+                            {hasGenerated && (
+                              <p className="text-xs text-green-600 text-center mt-1">✓ Gerado</p>
+                            )}
                           </div>
                         );
                       })}
@@ -441,17 +405,14 @@ export default function ReviewPage() {
                   </div>
                 )}
 
-                {/* Interaction items */}
+                {/* Interaction items grid */}
                 {interactionItems.length > 0 && (
-                  <div className="mb-5">
+                  <div className="mb-6">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Itens da interação</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {interactionItems.map((item) => {
                         const generatedEntry = (item as unknown as ImageOption).generated?.[activeStyle];
                         const hasGenerated = !!generatedEntry?.image_url;
-                        const isGenerating = generatingId === `item_${item.name}`;
-                        const prompt = (item as unknown as ImageOption).prompts?.[activeStyle] || (item as unknown as { image_prompt?: string }).image_prompt || "";
-
                         return (
                           <div key={item.name} className="border border-gray-200 rounded-xl p-3 bg-white">
                             <div className="w-full h-20 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2">
@@ -461,30 +422,9 @@ export default function ReviewPage() {
                                 <ImageIcon size={20} className="text-gray-300" />
                               )}
                             </div>
-                            <p className="text-xs font-medium text-gray-700 mb-1 text-center">{item.name}</p>
-                            {!hasGenerated && (
-                              <button
-                                onClick={async () => {
-                                  setGeneratingId(`item_${item.name}`);
-                                  try {
-                                    await api.post(`/adaptations/${id}/generate-images`, { style: activeStyle });
-                                    toast.success("Imagens geradas!");
-                                    load();
-                                  } catch {
-                                    toast.error("Erro ao gerar. Verifique sua chave OpenAI.");
-                                  } finally {
-                                    setGeneratingId(null);
-                                  }
-                                }}
-                                disabled={!!generatingId}
-                                className="w-full flex items-center justify-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-medium py-1.5 rounded-lg disabled:opacity-50"
-                              >
-                                {isGenerating ? <Loader2 size={10} className="animate-spin" /> : <ImageIcon size={10} />}
-                                Gerar
-                              </button>
-                            )}
+                            <p className="text-xs font-medium text-gray-700 text-center">{item.name}</p>
                             {hasGenerated && (
-                              <p className="text-xs text-green-600 text-center font-medium">✓ Gerado</p>
+                              <p className="text-xs text-green-600 text-center mt-1">✓ Gerado</p>
                             )}
                           </div>
                         );
@@ -501,10 +441,10 @@ export default function ReviewPage() {
                     className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl"
                   >
                     {applyingStyle ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                    Aplicar estilo "{STYLE_LABELS[activeStyle]}" e seleção ativas
+                    Aplicar — {STYLE_LABELS[activeStyle]}
                   </button>
                   <p className="text-xs text-gray-400 mt-2">
-                    Atualiza as imagens visíveis ao aluno. Imagens marcadas (☑) aparecem na aba Visual.
+                    Aplica o estilo selecionado a todas as imagens e atualiza a visualização do aluno.
                   </p>
                 </div>
               </>

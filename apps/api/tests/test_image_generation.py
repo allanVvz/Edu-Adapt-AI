@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.activity import Activity
 from app.models.adaptation import ActivityAdaptation
 from app.models.api_key import ApiKey
-from app.services.openai_service import _mock_adaptation, IMAGE_STYLES
+from app.services.openai_service import _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS
 from .conftest import create_user, get_token, auth
 
 FAKE_URL = "https://mock-dalle.com/test-image.png"
@@ -70,6 +70,28 @@ def mock_dalle():
         instance.images.generate = AsyncMock(return_value=mock_resp)
         mock_cls.return_value = instance
         yield mock_cls
+
+
+def test_image_styles_use_valid_models():
+    """
+    CONTRACT TEST — no mock, no network.
+    Fails immediately if IMAGE_STYLES references a deprecated or non-existent model.
+    This is the guard that would have caught the dall-e-2 deprecation before deploy.
+    """
+    VALID_SIZES = {
+        "1024x1024", "1024x1792", "1792x1024",  # dall-e-3
+        "1536x1024", "1024x1536", "auto",         # gpt-image-1
+    }
+    for style_name, cfg in IMAGE_STYLES.items():
+        assert "model" in cfg, f"Style '{style_name}' is missing the 'model' field"
+        assert cfg["model"] in VALID_IMAGE_MODELS, (
+            f"Style '{style_name}' uses model '{cfg['model']}' which is not in VALID_IMAGE_MODELS "
+            f"{sorted(VALID_IMAGE_MODELS)}. Update IMAGE_STYLES in openai_service.py."
+        )
+        assert cfg["size"] in VALID_SIZES, (
+            f"Style '{style_name}' uses size '{cfg['size']}' which is not valid for model '{cfg['model']}'. "
+            f"Valid sizes: {sorted(VALID_SIZES)}"
+        )
 
 
 def test_mock_adaptation_has_new_schema():

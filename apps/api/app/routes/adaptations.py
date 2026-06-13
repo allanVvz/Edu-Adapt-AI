@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -239,23 +239,31 @@ async def generate_images(
 
     client = AsyncOpenAI(api_key=openai_key)
     style = body.style
-    size = IMAGE_STYLES[style]["size"]
+    style_cfg = IMAGE_STYLES[style]
+    model = style_cfg["model"]
+    size = style_cfg["size"]
+
+    # Guard: reject if model is not in the known-valid list
+    if model not in VALID_IMAGE_MODELS:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Modelo de imagem '{model}' não é suportado. Modelos válidos: {sorted(VALID_IMAGE_MODELS)}"
+        )
+
     output = copy.deepcopy(adaptation.output_data or {})
     generated_count = 0
     errors = []
 
     for img in output.get("image_options", []):
-        # Skip if already generated for this style
         already = (img.get("generated") or {}).get(style, {}).get("image_url")
         if already:
             continue
-        # Resolve prompt: new schema first, fallback to legacy "prompt" field
         prompt = (img.get("prompts") or {}).get(style) or img.get("prompt", "")
         if not prompt:
             continue
         try:
             resp = await client.images.generate(
-                model="dall-e-2",
+                model=model,
                 prompt=prompt[:1000],
                 size=size,
                 n=1,
@@ -282,7 +290,7 @@ async def generate_images(
                 continue
             try:
                 resp = await client.images.generate(
-                    model="dall-e-2",
+                    model=model,
                     prompt=prompt[:1000],
                     size=size,
                     n=1,
