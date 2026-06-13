@@ -267,6 +267,7 @@ async def generate_images(
                 prompt=prompt[:1000],
                 size=size,
                 n=1,
+                response_format="url",
             )
             url = resp.data[0].url
             if "generated" not in img or not isinstance(img["generated"], dict):
@@ -294,6 +295,7 @@ async def generate_images(
                     prompt=prompt[:1000],
                     size=size,
                     n=1,
+                    response_format="url",
                 )
                 url = resp.data[0].url
                 if "generated" not in item or not isinstance(item["generated"], dict):

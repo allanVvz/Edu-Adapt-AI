@@ -1,7 +1,10 @@
 """
-CI/CD tests for DALL-E image generation.
-All OpenAI calls are mocked — no real API keys required.
+CI/CD tests for image generation.
+
+Unit/integration tests: all OpenAI calls are mocked — no real API keys required.
+E2E test: requires OPENAI_TEST_API_KEY env var — calls the real OpenAI API.
 """
+import os
 import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -76,10 +79,10 @@ def test_image_styles_use_valid_models():
     """
     CONTRACT TEST — no mock, no network.
     Fails immediately if IMAGE_STYLES references a deprecated or non-existent model.
-    This is the guard that would have caught the dall-e-2 deprecation before deploy.
+    History: dall-e-2 was deprecated Nov 2024; dall-e-3 was removed 2025; gpt-image-1 is current.
     """
     VALID_SIZES = {
-        "1024x1024", "1024x1792", "1792x1024",  # dall-e-3
+        "1024x1024", "1024x1792", "1792x1024",  # dall-e-3 (legacy)
         "1536x1024", "1024x1536", "auto",         # gpt-image-1
     }
     for style_name, cfg in IMAGE_STYLES.items():
@@ -275,3 +278,94 @@ def test_generate_images_requires_api_key(client, session):
     )
     assert r.status_code == 400
     assert "Chave OpenAI" in r.json()["detail"]
+
+
+# ─── E2E test (requires real API key) ────────────────────────────────────────
+
+_REAL_KEY = os.environ.get("OPENAI_TEST_API_KEY", "")
+
+
+@pytest.mark.skipif(not _REAL_KEY, reason="E2E: set OPENAI_TEST_API_KEY to run against the real OpenAI API")
+def test_e2e_generate_4_images_real_api(client, session):
+    """
+    E2E TEST — calls the real OpenAI gpt-image-1 API.
+    Activity: Rotina da Manhã (2 image_options + 2 interaction items = 4 slots).
+    Validates that all 4 images are generated and have valid HTTPS URLs.
+    """
+    teacher = create_user(session, role="teacher", suffix="_e2e")
+
+    activity = Activity(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title="Rotina da Manhã",
+        statement="Observe as imagens e coloque na ordem correta.",
+        question="Qual é a sequência correta da manhã?",
+        expected_answer="acordar, escovar os dentes",
+        activity_type="sequencing",
+        status="active",
+    )
+    session.add(activity)
+    session.flush()
+
+    output = _mock_adaptation(
+        {
+            "title": activity.title,
+            "statement": activity.statement,
+            "question": activity.question,
+            "expected_answer": activity.expected_answer,
+            "activity_type": activity.activity_type,
+        },
+        {},
+    )
+    adaptation = ActivityAdaptation(
+        id=str(uuid.uuid4()),
+        activity_id=activity.id,
+        generated_by="mock",
+        output_data=output,
+        status="review",
+        version=1,
+    )
+    session.add(adaptation)
+
+    api_key_obj = ApiKey(
+        id=str(uuid.uuid4()),
+        user_id=teacher.id,
+        provider="openai",
+        key_name="e2e-real-key",
+        encrypted_value=_REAL_KEY,
+        status="active",
+    )
+    session.add(api_key_obj)
+    session.commit()
+    session.refresh(adaptation)
+
+    token = get_token(client, teacher.email)
+    r = client.post(
+        f"/adaptations/{adaptation.id}/generate-images",
+        json={"style": "cartoon_2d"},
+        headers=auth(token),
+    )
+
+    assert r.status_code == 200, f"generate-images failed: {r.text}"
+    body = r.json()
+    assert body["errors"] == [], f"Generation errors: {body['errors']}"
+    assert body["images_generated"] == 4, (
+        f"Expected 4 images (2 image_options + 2 items), got {body['images_generated']}"
+    )
+
+    session.expire_all()
+    updated = session.get(ActivityAdaptation, adaptation.id)
+
+    all_urls = []
+    for img in updated.output_data["image_options"]:
+        url = img["generated"]["cartoon_2d"]["image_url"]
+        assert url and url.startswith("https://"), f"image_option '{img['id']}' has no valid URL: {url}"
+        all_urls.append(url)
+
+    for interaction in updated.output_data["interaction_options"]:
+        for item in interaction["items"]:
+            url = item["generated"]["cartoon_2d"]["image_url"]
+            assert url and url.startswith("https://"), f"item '{item['name']}' has no valid URL: {url}"
+            all_urls.append(url)
+
+    assert len(all_urls) == 4, f"Expected 4 URLs total, got {len(all_urls)}"

@@ -1,4 +1,4 @@
-.PHONY: test test-api test-web test-images test-web-health cc lint pre-deploy up down logs
+.PHONY: test test-api test-web test-images test-images-e2e test-web-health cc lint pre-deploy up down logs
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
 test: cc test-api test-web test-web-health
@@ -13,8 +13,18 @@ test-web:
 	docker compose exec -T web npm test -- --passWithNoTests --watchAll=false
 
 test-images:
-	@echo "=== Image Generation Tests (mock DALL-E) ==="
-	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short
+	@echo "=== Image Generation Tests (mocked) ==="
+	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short -k "not e2e"
+
+test-images-e2e:
+	@echo "=== E2E Image Generation (real OpenAI API — requires OPENAI_TEST_API_KEY) ==="
+	@if [ -z "$(OPENAI_TEST_API_KEY)" ]; then \
+		echo "SKIP: export OPENAI_TEST_API_KEY=sk-... to run this test"; \
+	else \
+		OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) docker compose exec -T \
+		  -e OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) api \
+		  python -m pytest tests/test_image_generation.py::test_e2e_generate_4_images_real_api -v --tb=short; \
+	fi
 
 test-web-health:
 	@echo "=== Frontend HTTP Health Check ==="

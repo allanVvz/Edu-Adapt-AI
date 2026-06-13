@@ -30,7 +30,7 @@ git push origin dev
 - **Frontend**: Next.js 14 (App Router) em `apps/web`
 - **Backend**: FastAPI em `apps/api`
 - **Banco**: PostgreSQL + pgvector via Docker
-- **IA**: OpenAI gpt-4o-mini (texto) + DALL-E 2 (imagens)
+- **IA**: OpenAI gpt-4o-mini (texto) + gpt-image-1 (imagens)
 
 ## Docker (local dev)
 
@@ -42,3 +42,15 @@ git push origin dev
 
 - `next.config.ts` → usar `.js` (TypeScript config não compatível com versão atual)
 - `bcrypt==3.2.2` — não atualizar, versões mais novas quebram no Alpine
+- `openai>=1.75.0` — versão mínima obrigatória; versões antigas não suportam `gpt-image-1`
+- **Modelos de imagem**: `dall-e-2` depreciado Nov 2024, `dall-e-3` removido 2025; usar `gpt-image-1`
+- Após mudar `requirements.txt`: rebuild obrigatório → `docker compose build api && docker compose up -d api`
+
+## Testes E2E de imagem
+
+Para rodar o teste real (chama a API OpenAI de verdade):
+```bash
+export OPENAI_TEST_API_KEY=sk-...
+make test-images-e2e
+```
+O teste valida que 4 imagens coerentes são geradas (2 image_options + 2 itens de interação).
