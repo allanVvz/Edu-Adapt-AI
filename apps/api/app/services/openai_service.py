@@ -71,6 +71,42 @@ def _parse_image_error(error: str, api_key: str = "") -> str:
     return error
 
 
+def _get_profile_image_modifier(profile_name: str) -> str:
+    """Return a prompt suffix that tailors image generation to a specific TEA profile.
+
+    The modifier is appended to the base prompt before calling the image model.
+    Saved as generated[style]["prompt_used"] in output_data so reviewers can inspect it.
+    """
+    name = profile_name.lower()
+
+    if "não verbal" in name or "nao verbal" in name:
+        # Minimal, single-symbol AAC pictogram style
+        return (
+            "AAC pictogram style, single symbol, thick black outline, pure white background, "
+            "flat 2D shape, no text, no shadows, no gradients, no extra details, "
+            "high contrast black and white, symbol communication board style"
+        )
+
+    if "hipersensibilidade" in name:
+        # Muted, desaturated — reduces visual overload
+        return (
+            "muted desaturated color palette, soft pastel tones, white background, "
+            "minimal details, clean simple composition, no bright colors, no red or yellow, "
+            "low visual noise, calm gentle illustration"
+        )
+
+    if "apoio visual" in name or "leitura inicial" in name:
+        # Friendly colorful cartoon but clean and educational
+        return (
+            "bright colorful friendly cartoon, clear distinct outlines, "
+            "simple clean background, educational illustration style, "
+            "child-friendly, readable labels if any"
+        )
+
+    # Default: no additional modifier
+    return ""
+
+
 def _make_prompts(subject: str) -> dict:
     return {style: f"{subject}, {cfg['suffix']}" for style, cfg in IMAGE_STYLES.items()}
 

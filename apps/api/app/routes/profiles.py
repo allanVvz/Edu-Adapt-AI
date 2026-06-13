@@ -5,6 +5,8 @@ from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
 from ..models.student_profile import StudentProfile
+from ..models.adaptation import ActivityAdaptation
+from ..models.activity import Activity
 from ..routes.auth import get_session_user, require_role
 import uuid
 
@@ -61,6 +63,37 @@ def get_profile(
     if not profile or profile.teacher_id != current_user.id:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
+
+
+@router.get("/{profile_id}/adaptations")
+def list_profile_adaptations(
+    profile_id: str,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    profile = session.get(StudentProfile, profile_id)
+    if not profile or profile.teacher_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    adaptations = session.exec(
+        select(ActivityAdaptation)
+        .where(ActivityAdaptation.student_profile_id == profile_id)
+        .order_by(ActivityAdaptation.created_at.desc())
+    ).all()
+
+    result = []
+    for a in adaptations:
+        activity = session.get(Activity, a.activity_id)
+        result.append({
+            "id": a.id,
+            "activity_id": a.activity_id,
+            "activity_title": activity.title if activity else None,
+            "status": a.status,
+            "version": a.version,
+            "generated_by": a.generated_by,
+            "created_at": str(a.created_at),
+        })
+    return result
 
 
 @router.put("/{profile_id}")

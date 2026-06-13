@@ -27,10 +27,8 @@ def _get_student(session: Session, user_id: str) -> Student:
 
 
 def _can_access(adaptation: ActivityAdaptation, student: Student) -> bool:
-    """True if student has direct assignment or matching profile."""
-    if adaptation.student_id == student.id:
-        return True
-    if adaptation.student_id is None and student.profile_id and adaptation.student_profile_id == student.profile_id:
+    """True if student's profile matches the adaptation's profile."""
+    if student.profile_id and adaptation.student_profile_id == student.profile_id:
         return True
     return False
 
@@ -86,27 +84,14 @@ def list_student_activities(
 
     student = _get_student(session, current_user.id)
 
-    # Direct assignments
-    direct = session.exec(
-        select(ActivityAdaptation).where(
-            ActivityAdaptation.student_id == student.id,
-            ActivityAdaptation.status == "published",
-        )
-    ).all()
-
-    # Profile-based (student_id not set, but profile matches)
-    profile_based = []
+    adaptations = []
     if student.profile_id:
-        profile_based = session.exec(
+        adaptations = session.exec(
             select(ActivityAdaptation).where(
                 ActivityAdaptation.student_profile_id == student.profile_id,
-                ActivityAdaptation.student_id == None,
                 ActivityAdaptation.status == "published",
             )
         ).all()
-
-    seen = {a.id for a in direct}
-    adaptations = direct + [a for a in profile_based if a.id not in seen]
 
     result = []
     for a in adaptations:

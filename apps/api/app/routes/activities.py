@@ -34,7 +34,6 @@ class ActivityCreate(BaseModel):
 
 class AdaptRequest(BaseModel):
     profile_id: Optional[str] = None
-    student_id: Optional[str] = None
 
 
 @router.get("")
@@ -174,7 +173,6 @@ async def adapt_activity(
         id=str(uuid.uuid4()),
         activity_id=activity_id,
         student_profile_id=body.profile_id,
-        student_id=body.student_id,
         generated_by=generated_by,
         output_data=output,
         status="review",

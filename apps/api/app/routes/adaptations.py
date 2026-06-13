@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier
 from ..models.gallery_image import GalleryImage
 import uuid
 
@@ -255,6 +255,18 @@ async def generate_images(
     generated_count = 0
     errors = []
 
+    # Profile image modifier — appended to prompts at generation time
+    profile_modifier = ""
+    if adaptation.student_profile_id:
+        profile = session.get(StudentProfile, adaptation.student_profile_id)
+        if profile:
+            profile_modifier = _get_profile_image_modifier(profile.name)
+
+    def _build_prompt(base_prompt: str) -> str:
+        if profile_modifier:
+            return f"{base_prompt}. {profile_modifier}"
+        return base_prompt
+
     def _save_to_gallery(url: str, description: str, prompt: str) -> None:
         gallery_img = GalleryImage(
             image_url=url,
@@ -272,9 +284,10 @@ async def generate_images(
         already = (img.get("generated") or {}).get(style, {}).get("image_url")
         if already:
             continue
-        prompt = (img.get("prompts") or {}).get(style) or img.get("prompt", "")
-        if not prompt:
+        base_prompt = (img.get("prompts") or {}).get(style) or img.get("prompt", "")
+        if not base_prompt:
             continue
+        prompt = _build_prompt(base_prompt)
         try:
             resp = await client.images.generate(
                 model=model,
@@ -285,7 +298,11 @@ async def generate_images(
             url = _save_image(resp.data[0])
             if "generated" not in img or not isinstance(img["generated"], dict):
                 img["generated"] = {}
-            img["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
+            img["generated"][style] = {
+                "image_url": url,
+                "generated_at": datetime.utcnow().isoformat(),
+                "prompt_used": prompt,
+            }
             if img.get("active_style", "cartoon_2d") == style:
                 img["image_url"] = url
             _save_to_gallery(url, img.get("description", "Imagem da atividade"), prompt)
@@ -300,9 +317,10 @@ async def generate_images(
             already = (item.get("generated") or {}).get(style, {}).get("image_url")
             if already:
                 continue
-            prompt = (item.get("prompts") or {}).get(style) or item.get("image_prompt", "")
-            if not prompt:
+            base_prompt = (item.get("prompts") or {}).get(style) or item.get("image_prompt", "")
+            if not base_prompt:
                 continue
+            prompt = _build_prompt(base_prompt)
             try:
                 resp = await client.images.generate(
                     model=model,
@@ -313,7 +331,11 @@ async def generate_images(
                 url = _save_image(resp.data[0])
                 if "generated" not in item or not isinstance(item["generated"], dict):
                     item["generated"] = {}
-                item["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
+                item["generated"][style] = {
+                    "image_url": url,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "prompt_used": prompt,
+                }
                 if item.get("active_style", "cartoon_2d") == style:
                     item["image_url"] = url
                 _save_to_gallery(url, item.get("name", "Item de interação"), prompt)
