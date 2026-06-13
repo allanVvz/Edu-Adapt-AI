@@ -7,8 +7,8 @@ import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
-  CheckCircle, XCircle, RefreshCw, Send, UserCheck,
-  ChevronDown, Loader2, Play, ImageIcon, Images, RotateCcw,
+  CheckCircle, XCircle, RefreshCw, Send,
+  Loader2, Play, ImageIcon, Images, RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -54,9 +54,6 @@ interface AdaptationData {
   teacher_feedback: string | null;
 }
 
-interface StudentItem { id: string; name: string; email: string }
-interface TeacherItem { id: string; name: string; email: string; role: string }
-
 // A slot reference used for picker + regen
 interface SlotRef {
   slot_type: "image_option" | "interaction_item";
@@ -87,34 +84,19 @@ export default function ReviewPage() {
   const [regenFeedback, setRegenFeedback] = useState("");
   const [regenerating, setRegenerating] = useState(false);
 
-  // Assignment
-  const [students, setStudents] = useState<StudentItem[]>([]);
-  const [teachers, setTeachers] = useState<TeacherItem[]>([]);
-  const [assignStudentId, setAssignStudentId] = useState("");
-  const [assignTeacherId, setAssignTeacherId] = useState("");
-  const [savingAssign, setSavingAssign] = useState(false);
 
   const [previewAnswers, setPreviewAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const user = getUser();
-    const admin = user?.role === "admin";
-    setIsAdmin(admin);
+    setIsAdmin(user?.role === "admin");
     load();
-    if (admin) {
-      api.get("/students").then((r) => setStudents(r.data)).catch(() => {});
-      api.get("/admin/users").then((r) =>
-        setTeachers((r.data as TeacherItem[]).filter((u) => u.role === "teacher" || u.role === "admin"))
-      ).catch(() => {});
-    }
   }, [id]);
 
   async function load() {
     try {
       const { data: d } = await api.get(`/adaptations/${id}`);
       setData(d);
-      setAssignStudentId(d.student_id || "");
-      setAssignTeacherId(d.activity?.teacher_id || "");
       const imgs = (d.output?.image_options as ImageOption[]) || [];
       const firstStyle = imgs[0]?.active_style;
       if (firstStyle) setActiveStyle(firstStyle);
@@ -228,26 +210,6 @@ export default function ReviewPage() {
     }
   }
 
-  async function saveAssignment(andPublish = false) {
-    setSavingAssign(true);
-    try {
-      await api.put(`/admin/adaptations/${id}/assign`, {
-        student_id: assignStudentId || null,
-        teacher_id: assignTeacherId || null,
-      });
-      if (andPublish) {
-        await api.post(`/adaptations/${id}/publish`);
-        toast.success("Atribuições salvas e adaptação publicada!");
-      } else {
-        toast.success("Atribuições salvas.");
-      }
-      load();
-    } catch {
-      toast.error("Erro ao salvar atribuições.");
-    } finally {
-      setSavingAssign(false);
-    }
-  }
 
   if (!data) return (
     <AdminLayout>
@@ -399,13 +361,6 @@ export default function ReviewPage() {
               <span className="text-xs bg-orange-50 text-orange-600 border border-orange-100 rounded-full px-2 py-0.5">
                 Prof. {data.activity.teacher_name}
               </span>
-            )}
-            {data.student_name ? (
-              <span className="text-xs bg-green-50 text-green-700 border border-green-100 rounded-full px-2 py-0.5">
-                Aluno: {data.student_name}
-              </span>
-            ) : (
-              <span className="text-xs bg-gray-100 text-gray-400 rounded-full px-2 py-0.5">Sem aluno atribuído</span>
             )}
             <span className={clsx("text-xs rounded-full px-2 py-0.5 font-medium", {
               "bg-yellow-100 text-yellow-700": data.status === "review",
@@ -789,80 +744,6 @@ export default function ReviewPage() {
         />
       </div>
 
-      {/* Assignment panel — admin only */}
-      {isAdmin && (
-        <div className="mt-4 bg-white rounded-xl border border-blue-100 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <UserCheck size={16} className="text-blue-500" />
-            <h3 className="font-semibold text-gray-700 text-sm">Atribuições da adaptação</h3>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Professor responsável</label>
-              <div className="relative">
-                <select
-                  value={assignTeacherId}
-                  onChange={(e) => setAssignTeacherId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm appearance-none pr-8"
-                >
-                  <option value="">Sem professor</option>
-                  {teachers.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
-                  ))}
-                </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Aluno destinatário
-                {!assignStudentId && data.profile && (
-                  <span className="ml-1 text-purple-500">(perfil: {data.profile.name})</span>
-                )}
-              </label>
-              <div className="relative">
-                <select
-                  value={assignStudentId}
-                  onChange={(e) => setAssignStudentId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm appearance-none pr-8"
-                >
-                  <option value="">Sem aluno (por perfil)</option>
-                  {students.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name} — {s.email}</option>
-                  ))}
-                </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => saveAssignment(false)}
-              disabled={savingAssign}
-              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 hover:bg-gray-50 text-xs font-medium px-3 py-2 rounded-lg"
-            >
-              {savingAssign ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
-              Salvar atribuições
-            </button>
-            <button
-              onClick={() => saveAssignment(true)}
-              disabled={savingAssign || data.status === "published"}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-2 rounded-lg"
-            >
-              {savingAssign ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-              Salvar + Publicar para aluno
-            </button>
-            {data.status === "published" && (
-              <span className="text-xs text-green-600 flex items-center gap-1">
-                <CheckCircle size={12} /> Publicado
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </AdminLayout>
   );
 }
