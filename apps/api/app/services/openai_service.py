@@ -1,3 +1,6 @@
+import base64 as _b64
+import os as _os
+import uuid as _uuid_mod
 from typing import Optional
 from sqlmodel import Session, select
 from ..models.api_key import ApiKey
@@ -21,6 +24,25 @@ IMAGE_STYLES: dict[str, dict] = {
 
 # gpt-image-1 is the recommended model since April 2025; dall-e-2 was deprecated Nov 2024
 VALID_IMAGE_MODELS = {"gpt-image-1", "dall-e-3"}
+
+_STATIC_DIR = "/app/static/images"
+_API_BASE_URL = _os.environ.get("API_BASE_URL", "http://localhost:8000")
+
+
+def _save_image(resp_data) -> str:
+    """Extract image URL from OpenAI response.
+    gpt-image-1 returns b64_json (saved to disk); dall-e-3 returns a direct URL.
+    """
+    if resp_data.url:
+        return resp_data.url
+    b64 = resp_data.b64_json
+    if not b64:
+        raise ValueError("OpenAI response has neither url nor b64_json")
+    _os.makedirs(_STATIC_DIR, exist_ok=True)
+    filename = f"{_uuid_mod.uuid4()}.png"
+    with open(f"{_STATIC_DIR}/{filename}", "wb") as f:
+        f.write(_b64.b64decode(b64))
+    return f"{_API_BASE_URL}/static/images/{filename}"
 
 
 def _parse_image_error(error: str, api_key: str = "") -> str:

@@ -103,7 +103,7 @@ async def test_api_key_images(
         raise HTTPException(status_code=400, detail="Teste de imagem é apenas para chaves OpenAI.")
 
     from openai import AsyncOpenAI
-    from ..services.openai_service import IMAGE_STYLES, _parse_image_error
+    from ..services.openai_service import IMAGE_STYLES, _parse_image_error, _save_image
 
     image_model = next(iter(IMAGE_STYLES.values()))["model"]
     client = AsyncOpenAI(api_key=key.encrypted_value)
@@ -114,9 +114,9 @@ async def test_api_key_images(
             prompt="A simple blue circle on a white background, minimal illustration, educational",
             size="1024x1024",
             n=1,
-            response_format="url",
         )
-        return {"ok": True, "model": image_model, "url": resp.data[0].url}
+        url = _save_image(resp.data[0])
+        return {"ok": True, "model": image_model, "url": url}
     except Exception as e:
         hint = _parse_image_error(str(e), key.encrypted_value)
         return {"ok": False, "model": image_model, "error": str(e), "hint": hint}

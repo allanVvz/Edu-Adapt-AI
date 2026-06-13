@@ -28,6 +28,7 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
       OPENAI_TEST_API_KEY: ${OPENAI_TEST_API_KEY:-}
     depends_on:
       postgres:

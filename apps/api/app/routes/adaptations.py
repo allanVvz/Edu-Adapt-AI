@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -267,9 +267,8 @@ async def generate_images(
                 prompt=prompt[:1000],
                 size=size,
                 n=1,
-                response_format="url",
             )
-            url = resp.data[0].url
+            url = _save_image(resp.data[0])
             if "generated" not in img or not isinstance(img["generated"], dict):
                 img["generated"] = {}
             img["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
@@ -295,9 +294,8 @@ async def generate_images(
                     prompt=prompt[:1000],
                     size=size,
                     n=1,
-                    response_format="url",
                 )
-                url = resp.data[0].url
+                url = _save_image(resp.data[0])
                 if "generated" not in item or not isinstance(item["generated"], dict):
                     item["generated"] = {}
                 item["generated"][style] = {"image_url": url, "generated_at": datetime.utcnow().isoformat()}
@@ -305,7 +303,7 @@ async def generate_images(
                     item["image_url"] = url
                 generated_count += 1
             except Exception as e:
-                errors.append({"id": item.get("name", "?"), "error": str(e)})
+                errors.append({"id": item.get("name", "?"), "error": _parse_image_error(str(e), openai_key)})
 
     adaptation.output_data = output
     session.add(adaptation)
