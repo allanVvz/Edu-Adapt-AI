@@ -12,7 +12,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.activity import Activity
 from app.models.adaptation import ActivityAdaptation
 from app.models.api_key import ApiKey
-from app.services.openai_service import _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS
+from app.services.openai_service import (
+    _mock_adaptation, _get_profile_image_modifier, IMAGE_STYLES, VALID_IMAGE_MODELS,
+)
 from .conftest import create_user, get_token, auth
 
 FAKE_URL = "https://mock-dalle.com/test-image.png"
@@ -278,6 +280,157 @@ def test_generate_images_requires_api_key(client, session):
     )
     assert r.status_code == 400
     assert "Chave OpenAI" in r.json()["detail"]
+
+
+# ─── Profile image modifier tests ────────────────────────────────────────────
+
+def test_profile_modifier_nao_verbal_returns_aac_style():
+    """TEA — Não Verbal profile should produce AAC pictogram modifier."""
+    modifier = _get_profile_image_modifier("TEA — Não Verbal")
+    assert modifier != "", "Non-verbal profile should have a modifier"
+    low_mod = modifier.lower()
+    assert "aac" in low_mod or "pictogram" in low_mod, (
+        f"Non-verbal modifier should reference AAC pictogram style, got: {modifier}"
+    )
+    # Must avoid rich imagery keywords
+    assert "vibrant" not in low_mod
+    assert "colorful" not in low_mod
+
+
+def test_profile_modifier_hipersensibilidade_returns_muted():
+    """TEA — Hipersensibilidade Visual should produce desaturated/muted modifier."""
+    modifier = _get_profile_image_modifier("TEA — Hipersensibilidade Visual")
+    assert modifier != "", "Hipersensibilidade profile should have a modifier"
+    low_mod = modifier.lower()
+    # Must contain desaturation/muted cues
+    assert any(kw in low_mod for kw in ("desaturated", "muted", "pastel", "soft")), (
+        f"Hipersensibilidade modifier should contain muted/desaturated cues, got: {modifier}"
+    )
+    # Must NOT promote vibrant colors
+    assert "vibrant" not in low_mod
+    assert "bright" not in low_mod
+
+
+def test_profile_modifier_apoio_visual_returns_colorful():
+    """TEA — Apoio Visual e Leitura Inicial should produce colorful/friendly modifier."""
+    modifier = _get_profile_image_modifier("TEA — Apoio Visual e Leitura Inicial")
+    assert modifier != "", "Apoio Visual profile should have a modifier"
+    low_mod = modifier.lower()
+    assert any(kw in low_mod for kw in ("colorful", "bright", "cartoon", "friendly")), (
+        f"Apoio Visual modifier should contain colorful/friendly cues, got: {modifier}"
+    )
+
+
+def test_profile_modifier_hipersensibilidade_is_less_colorful_than_apoio_visual():
+    """
+    Validates the business rule: Hipersensibilidade images must be less colorful than Apoio Visual.
+    Proxy: Hipersensibilidade modifier must NOT contain colorfulness keywords that Apoio Visual has.
+    """
+    mod_hip = _get_profile_image_modifier("TEA — Hipersensibilidade Visual").lower()
+    mod_apo = _get_profile_image_modifier("TEA — Apoio Visual e Leitura Inicial").lower()
+
+    colorful_kws = {"colorful", "bright", "vibrant", "rich color"}
+    muted_kws = {"desaturated", "muted", "pastel", "soft", "low visual noise"}
+
+    hip_has_colorful = any(kw in mod_hip for kw in colorful_kws)
+    apo_has_colorful = any(kw in mod_apo for kw in colorful_kws)
+    hip_has_muted = any(kw in mod_hip for kw in muted_kws)
+
+    assert not hip_has_colorful, (
+        f"Hipersensibilidade should NOT have colorfulness keywords. Got: {mod_hip}"
+    )
+    assert apo_has_colorful or ("cartoon" in mod_apo), (
+        f"Apoio Visual should have colorfulness/cartoon keywords. Got: {mod_apo}"
+    )
+    assert hip_has_muted, (
+        f"Hipersensibilidade should have muted/desaturated keywords. Got: {mod_hip}"
+    )
+
+
+def test_profile_modifier_unknown_profile_returns_empty():
+    """Unknown profiles should return empty string (no modifier = standard generation)."""
+    modifier = _get_profile_image_modifier("Perfil Desconhecido")
+    assert modifier == "", f"Unknown profile should return empty modifier, got: {modifier!r}"
+
+
+def test_profile_modifier_stored_as_prompt_used_in_output(client, session, mock_dalle):
+    """When a profile has a modifier, generated[style].prompt_used should contain the modifier."""
+    from app.models.student_profile import StudentProfile
+
+    teacher = create_user(session, role="teacher", suffix="_mod1")
+
+    # Create TEA — Hipersensibilidade Visual profile
+    profile = StudentProfile(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        name="TEA — Hipersensibilidade Visual",
+        reading_level="basic",
+        autonomy_level="medium",
+    )
+    session.add(profile)
+    session.flush()
+
+    activity = Activity(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title="Cores e Formas",
+        statement="Observe.",
+        question="Qual é a cor?",
+        expected_answer="Vermelho, Azul",
+        activity_type="association",
+        status="active",
+    )
+    session.add(activity)
+    session.flush()
+
+    output = _mock_adaptation(
+        {"title": activity.title, "statement": activity.statement,
+         "question": activity.question, "expected_answer": activity.expected_answer,
+         "activity_type": activity.activity_type},
+        {"name": profile.name},
+    )
+    adaptation = ActivityAdaptation(
+        id=str(uuid.uuid4()),
+        activity_id=activity.id,
+        student_profile_id=profile.id,
+        generated_by="mock",
+        output_data=output,
+        status="review",
+        version=1,
+    )
+    session.add(adaptation)
+
+    from app.models.api_key import ApiKey
+    api_key = ApiKey(
+        id=str(uuid.uuid4()),
+        user_id=teacher.id,
+        provider="openai",
+        key_name="test-key-modifier",
+        encrypted_value="sk-fake-key",
+        status="active",
+    )
+    session.add(api_key)
+    session.commit()
+
+    token = get_token(client, teacher.email)
+    r = client.post(
+        f"/adaptations/{adaptation.id}/generate-images",
+        json={"style": "cartoon_2d"},
+        headers=auth(token),
+    )
+    assert r.status_code == 200
+
+    session.expire_all()
+    updated = session.get(ActivityAdaptation, adaptation.id)
+    img = updated.output_data["image_options"][0]
+    prompt_used = img["generated"]["cartoon_2d"].get("prompt_used", "")
+
+    # The modifier should be in the prompt_used
+    expected_modifier_kw = "desaturated"  # from Hipersensibilidade modifier
+    assert expected_modifier_kw in prompt_used.lower(), (
+        f"prompt_used should contain the profile modifier keyword '{expected_modifier_kw}'. "
+        f"Got: {prompt_used[:200]}"
+    )
 
 
 # ─── E2E test (requires real API key) ────────────────────────────────────────

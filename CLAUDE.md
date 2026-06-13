@@ -46,6 +46,28 @@ git push origin dev
 - **Modelos de imagem**: `dall-e-2` depreciado Nov 2024, `dall-e-3` removido 2025; usar `gpt-image-1`
 - Após mudar `requirements.txt`: rebuild obrigatório → `docker compose build api && docker compose up -d api`
 
+## Regra de negócio: Adaptações por Perfil
+
+- Adaptações pertencem ao **perfil** (`student_profile_id`), não ao aluno
+- Todos os alunos com o mesmo perfil veem automaticamente as adaptações daquele perfil
+- `student_id` foi removido do fluxo de adaptação — NÃO adicionar de volta
+- Novos alunos são criados com `profile_id` preenchido; acesso é dado pelo perfil
+
+## Perfis TEA (seed default)
+
+| Perfil | Complexidade | Modificador de imagem |
+|---|---|---|
+| TEA — Não Verbal | minimal | AAC pictogram B&W |
+| TEA — Hipersensibilidade Visual | low_stimulation | Muted/pastel |
+| TEA — Apoio Visual e Leitura Inicial | supported | Colorful cartoon |
+
+## Modificador de imagem por perfil
+
+Função `_get_profile_image_modifier(profile_name)` em `openai_service.py`:
+- Detecta tipo de perfil pelo nome (case-insensitive)
+- Retorna suffix de prompt para gpt-image-1
+- Salvo como `generated[style]["prompt_used"]` no output_data
+
 ## Testes E2E de imagem
 
 Para rodar o teste real (chama a API OpenAI de verdade):
@@ -54,3 +76,8 @@ export OPENAI_TEST_API_KEY=sk-...
 make test-images-e2e
 ```
 O teste valida que 4 imagens coerentes são geradas (2 image_options + 2 itens de interação).
+
+Para rodar só os testes de perfil (sem API real):
+```bash
+make test-profiles
+```

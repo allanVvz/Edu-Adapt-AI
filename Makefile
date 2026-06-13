@@ -1,4 +1,4 @@
-.PHONY: test test-api test-web test-images test-images-e2e test-web-health cc lint pre-deploy up down logs
+.PHONY: test test-api test-web test-images test-images-e2e test-profiles test-web-health cc lint pre-deploy up down logs
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
 test: cc test-api test-web test-web-health
@@ -15,6 +15,10 @@ test-web:
 test-images:
 	@echo "=== Image Generation Tests (mocked) ==="
 	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short -k "not e2e"
+
+test-profiles:
+	@echo "=== Profile Image Modifier Tests (unit, no API needed) ==="
+	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short -k "profile"
 
 test-images-e2e:
 	@echo "=== E2E Image Generation (real OpenAI API — requires OPENAI_TEST_API_KEY) ==="
