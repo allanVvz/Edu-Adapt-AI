@@ -141,7 +141,8 @@ export default function ReviewPage() {
       const result = await api.post(`/adaptations/${id}/generate-images`, { style });
       const errs = result.data?.errors ?? [];
       if (errs.length > 0) {
-        toast.error(`Alguns erros: ${errs.map((e: { error: string }) => e.error).join(", ")}`);
+        const first = errs[0] as { error: string };
+        toast.error(first.error, { duration: 10000 });
       } else {
         toast.success(`Imagens ${STYLE_LABELS[style]} geradas!`);
       }

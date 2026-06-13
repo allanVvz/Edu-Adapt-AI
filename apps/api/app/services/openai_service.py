@@ -23,6 +23,32 @@ IMAGE_STYLES: dict[str, dict] = {
 VALID_IMAGE_MODELS = {"gpt-image-1", "dall-e-3"}
 
 
+def _parse_image_error(error: str, api_key: str = "") -> str:
+    """Return an actionable Portuguese hint for common OpenAI image generation errors."""
+    e = error.lower()
+    if "does not exist" in e or ("invalid_value" in e and "model" in e):
+        if api_key.startswith("sk-proj-"):
+            return (
+                "Sua chave é do tipo sk-proj-... (Project Key). "
+                "Project Keys têm restrições de modelo por projeto. "
+                "Resolução: acesse platform.openai.com → seu projeto → "
+                "Settings → Limits → habilite 'Images' ou 'gpt-image-1' nas permissões do projeto."
+            )
+        return (
+            "Modelo de imagem não disponível para sua conta. "
+            "Acesse platform.openai.com → Settings → Limits e verifique se sua conta tem acesso a modelos de imagem."
+        )
+    if "insufficient_quota" in e or ("quota" in e and "exceed" in e):
+        return "Cota esgotada. Verifique seu saldo em platform.openai.com/usage e adicione créditos se necessário."
+    if "invalid_api_key" in e or "incorrect api key" in e:
+        return "Chave OpenAI inválida ou revogada. Gere uma nova chave em platform.openai.com/api-keys."
+    if "billing" in e:
+        return "Problema de cobrança. Adicione um método de pagamento em platform.openai.com/settings/billing."
+    if "rate_limit" in e:
+        return "Limite de requisições atingido. Aguarde alguns segundos e tente novamente."
+    return error
+
+
 def _make_prompts(subject: str) -> dict:
     return {style: f"{subject}, {cfg['suffix']}" for style, cfg in IMAGE_STYLES.items()}
 

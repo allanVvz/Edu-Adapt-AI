@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -277,7 +277,7 @@ async def generate_images(
                 img["image_url"] = url
             generated_count += 1
         except Exception as e:
-            errors.append({"id": img.get("id", "?"), "error": str(e)})
+            errors.append({"id": img.get("id", "?"), "error": _parse_image_error(str(e), openai_key)})
 
     for interaction in output.get("interaction_options", []):
         for item in interaction.get("items", []):

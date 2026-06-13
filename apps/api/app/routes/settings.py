@@ -89,6 +89,39 @@ def create_api_key(
     return {"id": key.id, "provider": key.provider, "key_name": key.key_name}
 
 
+@router.post("/api-keys/{key_id}/test-images")
+async def test_api_key_images(
+    key_id: str,
+    current_user: User = Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    """Try to generate a real image with gpt-image-1 to validate the key has image access."""
+    key = session.get(ApiKey, key_id)
+    if not key or key.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if key.provider != "openai":
+        raise HTTPException(status_code=400, detail="Teste de imagem é apenas para chaves OpenAI.")
+
+    from openai import AsyncOpenAI
+    from ..services.openai_service import IMAGE_STYLES, _parse_image_error
+
+    image_model = next(iter(IMAGE_STYLES.values()))["model"]
+    client = AsyncOpenAI(api_key=key.encrypted_value)
+
+    try:
+        resp = await client.images.generate(
+            model=image_model,
+            prompt="A simple blue circle on a white background, minimal illustration, educational",
+            size="1024x1024",
+            n=1,
+            response_format="url",
+        )
+        return {"ok": True, "model": image_model, "url": resp.data[0].url}
+    except Exception as e:
+        hint = _parse_image_error(str(e), key.encrypted_value)
+        return {"ok": False, "model": image_model, "error": str(e), "hint": hint}
+
+
 @router.delete("/api-keys/{key_id}", status_code=204)
 def delete_api_key(
     key_id: str,
