@@ -51,7 +51,10 @@ def test_image_options_structure(output):
     for img in items:
         assert "id" in img
         assert "description" in img
-        assert "prompt" in img
+        assert "prompts" in img
+        assert isinstance(img["prompts"], dict)
+        assert "line_art" in img["prompts"]
+        assert "cartoon_2d" in img["prompts"]
 
 
 def test_audio_options_structure(output):
@@ -64,21 +67,26 @@ def test_audio_options_structure(output):
         assert "voice_style" in audio
 
 
-def test_interaction_items_are_strings(output):
-    """Items in interaction_options must be str to render safely in React."""
+def test_interaction_items_are_dicts(output):
+    """Items in interaction_options are dicts with name + prompts (image-ready schema)."""
     for interaction in output["interaction_options"]:
         for item in interaction.get("items", []):
-            assert isinstance(item, str), (
-                f"interaction item must be str, got {type(item).__name__}: {item!r}"
+            assert isinstance(item, dict), (
+                f"interaction item must be dict, got {type(item).__name__}: {item!r}"
             )
+            assert "name" in item, f"item missing 'name': {item!r}"
+            assert "prompts" in item, f"item missing 'prompts': {item!r}"
+            assert isinstance(item["prompts"], dict)
 
 
-def test_interaction_zones_are_strings(output):
+def test_interaction_zones_are_dicts(output):
+    """Zones are dicts with a 'name' key (label for the drop target)."""
     for interaction in output["interaction_options"]:
         for zone in interaction.get("zones", []):
-            assert isinstance(zone, str), (
-                f"zone must be str, got {type(zone).__name__}: {zone!r}"
+            assert isinstance(zone, dict), (
+                f"zone must be dict, got {type(zone).__name__}: {zone!r}"
             )
+            assert "name" in zone, f"zone missing 'name': {zone!r}"
 
 
 def test_validation_scores_in_range(output):

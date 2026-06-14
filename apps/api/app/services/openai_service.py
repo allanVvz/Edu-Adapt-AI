@@ -4,6 +4,7 @@ import uuid as _uuid_mod
 from typing import Optional
 from sqlmodel import Session, select
 from ..models.api_key import ApiKey
+from .emoji_service import get_emoji_for_concept
 
 # ─── Style registry ───────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ IMAGE_STYLES: dict[str, dict] = {
 VALID_IMAGE_MODELS = {"gpt-image-1", "dall-e-3"}
 
 _STATIC_DIR = "/app/static/images"
+_AUDIO_DIR = "/app/static/audio"
 _API_BASE_URL = _os.environ.get("API_BASE_URL", "http://localhost:8000")
 
 
@@ -115,6 +117,27 @@ def _make_generated_slots() -> dict:
     return {style: {"image_url": None, "generated_at": None} for style in IMAGE_STYLES}
 
 
+def _build_image_option(img_id: str, description: str, base_subject: str) -> dict:
+    """Build a single image_option dict, checking emoji availability first."""
+    emoji = get_emoji_for_concept(description)
+    option: dict = {
+        "id": img_id,
+        "description": description,
+        "base_subject": base_subject,
+        "prompts": _make_prompts(base_subject),
+        "generated": _make_generated_slots(),
+        "active_style": "cartoon_2d",
+        "is_active": True,
+        "image_url": None,
+    }
+    if emoji:
+        option["illustration_type"] = "emoji"
+        option["emoji"] = emoji
+    else:
+        option["illustration_type"] = "generated"
+    return option
+
+
 # ─── Interaction type detection ───────────────────────────────────────────────
 
 def _detect_interaction_type(activity: dict) -> str:
@@ -184,30 +207,9 @@ def _mock_adaptation(activity: dict, profile: dict) -> dict:
     difficulty_hint = f" Atenção às dificuldades: {', '.join(str(d) for d in difficulties)}." if difficulties else ""
     modality_hint = f" Use: {', '.join(str(m) for m in modalities)}." if modalities else ""
 
-    img1_subject = f"educational illustration of {title}"
-    img2_subject = f"AAC pictogram for {title}"
-
     image_options = [
-        {
-            "id": "img_1",
-            "description": f"Ilustração de {title}",
-            "base_subject": img1_subject,
-            "prompts": _make_prompts(img1_subject),
-            "generated": _make_generated_slots(),
-            "active_style": "cartoon_2d",
-            "is_active": True,
-            "image_url": None,
-        },
-        {
-            "id": "img_2",
-            "description": "Pictograma AAC",
-            "base_subject": img2_subject,
-            "prompts": _make_prompts(img2_subject),
-            "generated": _make_generated_slots(),
-            "active_style": "cartoon_2d",
-            "is_active": True,
-            "image_url": None,
-        },
+        _build_image_option("img_1", f"Ilustração de {title}", f"educational illustration of {title}"),
+        _build_image_option("img_2", "Pictograma AAC", f"AAC pictogram for {title}"),
     ]
 
     return {
@@ -216,7 +218,16 @@ def _mock_adaptation(activity: dict, profile: dict) -> dict:
         ],
         "image_options": image_options,
         "audio_options": [
-            {"id": "audio_1", "script": f"{statement} {question}", "voice_style": "pausado e claro"}
+            {
+                "id": "audio_1",
+                "script": f"{statement} {question}",
+                "tts_script": f"{statement} {question}",
+                "voice_style": "pausado e claro",
+                "voice": "alloy",
+                "rhythm": 1.0,
+                "pitch": "normal",
+                "audio_url": None,
+            }
         ],
         "interaction_options": [
             {
@@ -262,11 +273,106 @@ def get_user_openai_key(session: Session, user_id: str) -> Optional[str]:
     return key.encrypted_value
 
 
-# ─── OpenAI generation ────────────────────────────────────────────────────────
+# ─── TTS (OpenAI tts-1) ───────────────────────────────────────────────────────
+
+async def generate_audio_tts(
+    openai_key: str,
+    tts_script: str,
+    voice: str = "alloy",
+    speed: float = 1.0,
+) -> str:
+    """Call OpenAI TTS-1, save MP3 to disk, return /static/audio/{uuid}.mp3 URL."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=openai_key)
+    response = await client.audio.speech.create(
+        model="tts-1",
+        voice=voice,
+        input=tts_script or ".",
+        speed=max(0.25, min(4.0, float(speed))),
+    )
+    _os.makedirs(_AUDIO_DIR, exist_ok=True)
+    filename = f"{_uuid_mod.uuid4()}.mp3"
+    path = f"{_AUDIO_DIR}/{filename}"
+    with open(path, "wb") as f:
+        f.write(response.content)
+    return f"{_API_BASE_URL}/static/audio/{filename}"
+
+
+# ─── Kernel-consistent generation (gpt-4o-mini) ──────────────────────────────
+
+def _profile_to_tea_variant(profile: dict) -> dict:
+    """Map a TEA profile to the instructional design attributes used in the kernel prompt."""
+    name = (profile.get("name") or "").lower()
+
+    if "não verbal" in name or "nao verbal" in name:
+        return {
+            "perfil": "Comunicador Simbólico",
+            "nivel_linguagem": "símbolo+palavra",
+            "densidade_texto": "pictograma",
+            "apoio_visual": "símbolo único",
+            "n_opcoes": "2 opções visíveis",
+            "resposta_motora": "toque único",
+            "carga_sensorial": "mínima",
+            "tom_audio": "muito lento e grave",
+            "reforco": "imediato",
+            "voice": "onyx",
+            "rhythm": 0.62,
+            "marcadores": "[aguarda toque]",
+        }
+
+    if "hipersensibilidade" in name:
+        return {
+            "perfil": "Conector Visual",
+            "nivel_linguagem": "concreta",
+            "densidade_texto": "pictograma",
+            "apoio_visual": "obrigatório",
+            "n_opcoes": "2–3 com imagem",
+            "resposta_motora": "arrastar e soltar",
+            "carga_sensorial": "baixa",
+            "tom_audio": "pausado",
+            "reforco": "por etapa",
+            "voice": "nova",
+            "rhythm": 0.80,
+            "marcadores": "[pausa]",
+        }
+
+    if "apoio visual" in name or "leitura inicial" in name:
+        return {
+            "perfil": "Explorador Verbal",
+            "nivel_linguagem": "literal",
+            "densidade_texto": "frases curtas",
+            "apoio_visual": "obrigatório",
+            "n_opcoes": "3–4 opções",
+            "resposta_motora": "escrever ou selecionar",
+            "carga_sensorial": "moderada",
+            "tom_audio": "natural",
+            "reforco": "final",
+            "voice": "shimmer",
+            "rhythm": 0.95,
+            "marcadores": "",
+        }
+
+    # Padrão
+    return {
+        "perfil": "Padrão",
+        "nivel_linguagem": "literal",
+        "densidade_texto": "parágrafos",
+        "apoio_visual": "opcional",
+        "n_opcoes": "4 opções",
+        "resposta_motora": "escrever",
+        "carga_sensorial": "moderada",
+        "tom_audio": "natural",
+        "reforco": "final",
+        "voice": "alloy",
+        "rhythm": 1.0,
+        "marcadores": "",
+    }
+
 
 async def generate_adaptation_with_ai(openai_key: str, activity: dict, profile: dict) -> dict:
     try:
         from openai import AsyncOpenAI
+        import json
         client = AsyncOpenAI(api_key=openai_key)
 
         def _fmt(val) -> str:
@@ -276,80 +382,60 @@ async def generate_adaptation_with_ai(openai_key: str, activity: dict, profile: 
                 return ", ".join(str(v) for v in val) if val else "não informado"
             return str(val)
 
+        variant = _profile_to_tea_variant(profile)
         styles_doc = "\n".join(
             f'   - "{k}": prompts no estilo {v["label"]}'
             for k, v in IMAGE_STYLES.items()
         )
 
-        prompt = f"""Você é um especialista em educação especial e tecnologia assistiva.
-Adapte a atividade abaixo para o perfil pedagógico do aluno descrito.
+        prompt = f"""Você é designer instrucional para TEA. Gere UMA versão de atividade adaptada.
 
-━━━━━━━━ ATIVIDADE ━━━━━━━━
+━━━━ ATIVIDADE ━━━━
 Título: {_fmt(activity.get("title"))}
 Disciplina: {_fmt(activity.get("discipline"))}
 Ano escolar: {_fmt(activity.get("school_year"))}
-Objetivo pedagógico: {_fmt(activity.get("pedagogical_objective"))}
-Tipo: {_fmt(activity.get("activity_type"))}
+Objetivo: {_fmt(activity.get("pedagogical_objective"))}
 Enunciado: {_fmt(activity.get("statement"))}
 Pergunta: {_fmt(activity.get("question"))}
 Resposta esperada: {_fmt(activity.get("expected_answer"))}
-Observações do professor: {_fmt(activity.get("teacher_notes"))}
+Observações: {_fmt(activity.get("teacher_notes"))}
 
-━━━━━━━━ PERFIL DO ALUNO ━━━━━━━━
-Nome do perfil: {_fmt(profile.get("name"))}
-Nível de leitura: {_fmt(profile.get("reading_level"))}
-Nível de autonomia: {_fmt(profile.get("autonomy_level"))}
-Dificuldades principais: {_fmt(profile.get("main_difficulties"))}
-Estratégias recomendadas: {_fmt(profile.get("recommended_strategies"))}
-Modalidades preferidas: {_fmt(profile.get("preferred_modalities"))}
-Recursos a evitar: {_fmt(profile.get("resources_to_avoid"))}
+━━━━ PERFIL ATIVO: {variant["perfil"]} ━━━━
+Nível linguagem: {variant["nivel_linguagem"]}
+Densidade texto: {variant["densidade_texto"]}
+Apoio visual: {variant["apoio_visual"]}
+Nº opções: {variant["n_opcoes"]}
+Resposta motora: {variant["resposta_motora"]}
+Carga sensorial: {variant["carga_sensorial"]}
+Tom áudio: {variant["tom_audio"]}
+Reforço: {variant["reforco"]}
+Marcadores de narração: {variant["marcadores"] or "nenhum"}
 
-━━━━━━━━ INSTRUÇÕES CRÍTICAS ━━━━━━━━
-1. interaction_options[0].type:
-   - "sequencing": ordenar/sequenciar/colocar em ordem (rotina, cronologia, passos)
-   - "multiple_choice": resposta única entre opções
-   - "drag_and_drop": classificação em categorias
+━━━━ REGRAS DE OURO ━━━━
+1. NUNCA use ironia, metáfora ambígua, voz passiva longa nem comando duplo.
+2. Enunciado começa com verbo de comando (Leia / Toque / Arraste / Ordene…).
+3. KERNEL CONSISTENCY: use o mesmo cenário, objetos e vocabulário da atividade original.
+4. Distratores em múltipla escolha = confusões conceituais reais (não absurdos).
+5. Arrastar-e-soltar: toda peça pertence a um alvo visível (id + "aceita").
+6. Toque único: 2 opções grandes; erro nunca é punido; reforço imediato.
+7. audio_options[0].script deve incluir os marcadores {variant["marcadores"] or "nenhum"} conforme o perfil.
+8. Todos os textos em português. Prompts de imagem em inglês.
 
-2. interaction_options[0].items: objetos com:
-   - "name": texto do item
-   - "image_prompt": prompt curto em inglês (backward compat)
-   - "prompts": {{"line_art": "...", "cartoon_2d": "..."}} — prompts em inglês por estilo
-   - "generated": {{"line_art": {{"image_url": null}}, "cartoon_2d": {{"image_url": null}}}}
-   - "active_style": "cartoon_2d"
-   - "image_url": null
-   Para "multiple_choice": items = [{{"name": "Minha resposta", ...}}]
-
-3. interaction_options[0].zones: objetos {{"name": "rótulo"}}
-   - "sequencing": [{{"name": "1°"}}, {{"name": "2°"}}, ...]
-   - "drag_and_drop": categorias da pergunta
-   - "multiple_choice": cada opção de resposta
-
-4. interaction_options[0].instructions: instrução direta ao aluno
-
-5. interaction_options[0].correct_answer:
-   - drag_and_drop/sequencing: {{"nome_item": "nome_zona"}}
-   - multiple_choice: {{"correct_zone": "nome_zona_correta"}}
-
-6. image_options[]: cada item deve ter:
-   - "id": "img_1", "img_2"
-   - "description": descrição em português
-   - "base_subject": assunto em inglês para geração de imagem
-   - "prompts": {{"line_art": "...", "cartoon_2d": "..."}} em inglês, estilos:
+INSTRUÇÕES DE ESTRUTURA:
+- interaction_options[0].type: "multiple_choice" | "drag_and_drop" | "sequencing"
+- items: lista de objetos com id, name, image_prompt (inglês), prompts (line_art+cartoon_2d), generated, active_style="cartoon_2d", image_url=null
+- zones: lista de objetos com id, name
+- correct_answer: {{item_name: zone_name}} ou {{"correct_zone": zone_name}} para MC
+- image_options: 2 itens com id, description, base_subject (inglês), prompts, generated, active_style, is_active, image_url
 {styles_doc}
-   - "generated": {{"line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{...}}}}
-   - "active_style": "cartoon_2d"
-   - "is_active": true
-   - "image_url": null
 
-7. Todos os textos em português brasileiro. Prompts de imagem em inglês.
-
-Responda APENAS com JSON válido neste formato:
+Responda SOMENTE com JSON válido:
 {{
   "text_adaptations": [{{"version": 1, "content": "texto adaptado"}}],
   "image_options": [
     {{
       "id": "img_1", "description": "Ilustração principal", "base_subject": "subject in english",
-      "prompts": {{"line_art": "subject, simple black and white...", "cartoon_2d": "subject, colorful 2D cartoon..."}},
+      "prompts": {{"line_art": "...", "cartoon_2d": "..."}},
       "generated": {{"line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{"image_url": null, "generated_at": null}}}},
       "active_style": "cartoon_2d", "is_active": true, "image_url": null
     }},
@@ -360,14 +446,23 @@ Responda APENAS com JSON válido neste formato:
       "active_style": "cartoon_2d", "is_active": true, "image_url": null
     }}
   ],
-  "audio_options": [{{"id": "audio_1", "script": "roteiro em português", "voice_style": "estilo"}}],
+  "audio_options": [{{
+    "id": "audio_1",
+    "script": "roteiro com marcadores {variant["marcadores"] or 'nenhum'}",
+    "tts_script": "roteiro sem marcadores para TTS",
+    "voice_style": "{variant["tom_audio"]}",
+    "voice": "{variant["voice"]}",
+    "rhythm": {variant["rhythm"]},
+    "pitch": "normal",
+    "audio_url": null
+  }}],
   "interaction_options": [{{
     "type": "drag_and_drop",
     "instructions": "instrução direta para o aluno",
     "items": [
       {{
         "name": "item1", "image_prompt": "item1 cartoon",
-        "prompts": {{"line_art": "item1, simple black and white...", "cartoon_2d": "item1, colorful 2D..."}},
+        "prompts": {{"line_art": "...", "cartoon_2d": "..."}},
         "generated": {{"line_art": {{"image_url": null}}, "cartoon_2d": {{"image_url": null}}}},
         "active_style": "cartoon_2d", "image_url": null
       }}
@@ -392,8 +487,17 @@ Responda APENAS com JSON válido neste formato:
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
-        import json
-        return json.loads(response.choices[0].message.content)
+        result = json.loads(response.choices[0].message.content)
+
+        # Post-process: add emoji illustration_type to image_options returned by AI
+        for img in result.get("image_options", []):
+            if "illustration_type" not in img:
+                emoji = get_emoji_for_concept(img.get("description", ""))
+                img["illustration_type"] = "emoji" if emoji else "generated"
+                if emoji:
+                    img["emoji"] = emoji
+
+        return result
     except Exception:
         from ..agents.orchestrator import run_adaptation_pipeline
         return await run_adaptation_pipeline(activity, profile, openai_key=None)

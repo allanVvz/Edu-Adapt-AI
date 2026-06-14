@@ -50,3 +50,16 @@ def serve_generated_image(filename: str):
         raise HTTPException(status_code=404)
     with open(filepath, "rb") as f:
         return Response(content=f.read(), media_type="image/png")
+
+
+@app.get("/static/audio/{filename}")
+def serve_generated_audio(filename: str):
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=404)
+    if not filename.endswith(".mp3"):
+        raise HTTPException(status_code=404)
+    filepath = f"/app/static/audio/{filename}"
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404)
+    with open(filepath, "rb") as f:
+        return Response(content=f.read(), media_type="audio/mpeg")

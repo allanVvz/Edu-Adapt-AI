@@ -10,7 +10,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier, generate_audio_tts
 from ..models.gallery_image import GalleryImage
 import uuid
 
@@ -209,6 +209,7 @@ async def reprocess_adaptation(
 
 class GenerateImagesRequest(BaseModel):
     style: str = "cartoon_2d"
+    force: bool = False
 
 
 class SetImageStyleRequest(BaseModel):
@@ -281,6 +282,9 @@ async def generate_images(
         session.add(gallery_img)
 
     for img in output.get("image_options", []):
+        # Skip emoji-illustrated slots unless explicitly forced
+        if img.get("illustration_type") == "emoji" and not body.force:
+            continue
         already = (img.get("generated") or {}).get(style, {}).get("image_url")
         if already:
             continue
@@ -551,3 +555,56 @@ def set_image_style(
     session.add(adaptation)
     session.commit()
     return {"status": "ok"}
+
+
+@router.post("/{adaptation_id}/generate-audio")
+async def generate_audio(
+    adaptation_id: str,
+    force: bool = False,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    """Generate TTS audio for all audio_options scripts using OpenAI tts-1.
+
+    Skips slots where audio_url is already set unless force=true.
+    """
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptation not found")
+    if not adaptation.output_data:
+        raise HTTPException(status_code=400, detail="Adaptation has no output data.")
+
+    openai_key = get_user_openai_key(session, current_user.id)
+    if not openai_key:
+        raise HTTPException(status_code=400, detail="Chave OpenAI não configurada. Acesse Configurações → Chaves de API.")
+
+    import copy
+    output = copy.deepcopy(adaptation.output_data)
+    audio_options = output.get("audio_options", [])
+    generated_count = 0
+    errors = []
+
+    for opt in audio_options:
+        if opt.get("audio_url") and not force:
+            continue
+        tts_script = opt.get("tts_script") or opt.get("script", "")
+        if not tts_script:
+            continue
+        voice = opt.get("voice", "alloy")
+        rhythm = float(opt.get("rhythm", 1.0))
+        try:
+            url = await generate_audio_tts(openai_key, tts_script, voice, rhythm)
+            opt["audio_url"] = url
+            generated_count += 1
+        except Exception as exc:
+            errors.append({"id": opt.get("id"), "error": str(exc)})
+
+    adaptation.output_data = output
+    session.add(adaptation)
+    session.commit()
+
+    return {
+        "generated": generated_count,
+        "errors": errors,
+        "audio_options": audio_options,
+    }
