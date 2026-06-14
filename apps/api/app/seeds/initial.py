@@ -18,6 +18,9 @@ def run():
         _seed_students(session)
         _seed_activities(session)
 
+    from .seed_tea_activities import run as run_tea
+    run_tea()
+
 
 def _seed_users(session: Session):
     users = [
