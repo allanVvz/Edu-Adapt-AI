@@ -1,0 +1,11 @@
+{
+  "description": "EduAdapt AI — API pública do backend FastAPI",
+  "repo": "https://github.com/allanVvz/Edu-Adapt-AI",
+  "owner": {
+    "username": "allanVvz",
+    "email": "allanulise027@gmail.com"
+  },
+  "record": {
+    "CNAME": "SEU-DOMINIO.ngrok-free.app"
+  }
+}
