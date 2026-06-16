@@ -306,9 +306,8 @@ def test_profile_modifier_hipersensibilidade_returns_muted():
     assert any(kw in low_mod for kw in ("desaturated", "muted", "pastel", "soft")), (
         f"Hipersensibilidade modifier should contain muted/desaturated cues, got: {modifier}"
     )
-    # Must NOT promote vibrant colors
+    # Must NOT promote vibrant colors ("no bright colors" is a negative qualifier — only check "vibrant")
     assert "vibrant" not in low_mod
-    assert "bright" not in low_mod
 
 
 def test_profile_modifier_apoio_visual_returns_colorful():
@@ -329,7 +328,7 @@ def test_profile_modifier_hipersensibilidade_is_less_colorful_than_apoio_visual(
     mod_hip = _get_profile_image_modifier("TEA — Hipersensibilidade Visual").lower()
     mod_apo = _get_profile_image_modifier("TEA — Apoio Visual e Leitura Inicial").lower()
 
-    colorful_kws = {"colorful", "bright", "vibrant", "rich color"}
+    colorful_kws = {"colorful", "vibrant", "rich color"}  # "bright" excluded: appears as "no bright colors" in muted modifier
     muted_kws = {"desaturated", "muted", "pastel", "soft", "low visual noise"}
 
     hip_has_colorful = any(kw in mod_hip for kw in colorful_kws)
