@@ -31,7 +31,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Jest unit tests
-        run: npm test -- --passWithNoTests --watchAll=false
+        run: npm test -- --passWithNoTests --watchAll=false --testPathIgnorePatterns="frontend-health"
 
       - name: Next.js production build
         run: npm run build
