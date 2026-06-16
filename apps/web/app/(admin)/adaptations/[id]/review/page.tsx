@@ -8,7 +8,7 @@ import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
   CheckCircle, XCircle, RefreshCw, Send,
-  Loader2, Play, ImageIcon, Images, RotateCcw,
+  Loader2, Play, ImageIcon, Images, RotateCcw, Volume2, Music2,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -38,6 +38,20 @@ interface ImageOption {
   is_active?: boolean;
   image_url?: string | null;
   prompt?: string;
+  illustration_type?: "emoji" | "generated";
+  emoji?: string;
+}
+
+interface AudioOption {
+  id?: string;
+  script: string;
+  tts_script?: string;
+  voice_style?: string;
+  voice?: string;
+  rhythm?: number;
+  pitch?: string;
+  audio_url?: string | null;
+  source?: string;
 }
 
 interface AdaptationData {
@@ -83,6 +97,9 @@ export default function ReviewPage() {
   const [regenSlot, setRegenSlot] = useState<SlotRef | null>(null);
   const [regenFeedback, setRegenFeedback] = useState("");
   const [regenerating, setRegenerating] = useState(false);
+
+  // Audio generation
+  const [generatingAudio, setGeneratingAudio] = useState(false);
 
 
   const [previewAnswers, setPreviewAnswers] = useState<Record<string, string>>({});
@@ -188,6 +205,27 @@ export default function ReviewPage() {
     }
   }
 
+  async function generateAudio(force = false) {
+    setGeneratingAudio(true);
+    try {
+      const result = await api.post(`/adaptations/${id}/generate-audio${force ? "?force=true" : ""}`);
+      const { generated, errors } = result.data as { generated: number; errors: string[] };
+      if (errors && errors.length > 0) {
+        toast.error(`Erro ao gerar áudio: ${errors[0]}`);
+      } else if (generated === 0) {
+        toast("Áudio já gerado. Use Regenerar para sobrescrever.", { icon: "ℹ️" });
+      } else {
+        toast.success(`${generated} áudio(s) gerado(s)!`);
+      }
+      load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Erro ao gerar áudio. Verifique sua chave OpenAI.");
+    } finally {
+      setGeneratingAudio(false);
+    }
+  }
+
   async function handleRegenerate() {
     if (!regenSlot) return;
     setRegenerating(true);
@@ -222,7 +260,7 @@ export default function ReviewPage() {
   const output = data.output || {};
   const textAdaptations = (output.text_adaptations as Array<{ version: number; content: string }>) || [];
   const imageOptions = (output.image_options as ImageOption[]) || [];
-  const audioOptions = (output.audio_options as Array<{ id?: string; script: string; voice_style: string }>) || [];
+  const audioOptions = (output.audio_options as AudioOption[]) || [];
   const interactionOptions = (output.interaction_options as Array<{
     type: string; instructions: string;
     items: ActivityItem[]; zones: ActivityZone[];
@@ -499,6 +537,22 @@ export default function ReviewPage() {
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Imagens da atividade</p>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {imageOptions.map((img) => {
+                        if (img.illustration_type === "emoji") {
+                          return (
+                            <div key={img.id} className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center">
+                              <div className="text-5xl mb-2 select-none">{img.emoji}</div>
+                              <p className="text-xs font-medium text-gray-700">{img.description}</p>
+                              <p className="text-xs text-amber-600 mt-1">ilustração emoji</p>
+                              <button
+                                onClick={() => generateImagesForStyle(activeStyle)}
+                                disabled={!!generatingStyle}
+                                className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 rounded-lg py-1 transition-colors disabled:opacity-50"
+                              >
+                                <ImageIcon size={10} /> Gerar IA mesmo assim
+                              </button>
+                            </div>
+                          );
+                        }
                         const generatedEntry = img.generated?.[activeStyle];
                         const imageUrl = generatedEntry?.image_url || img.image_url || null;
                         return (
@@ -557,13 +611,72 @@ export default function ReviewPage() {
 
         {tab === "Áudio" && (
           <div>
-            <h2 className="font-semibold text-gray-700 mb-3">Roteiros de áudio</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-700">Roteiros de áudio TTS</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => generateAudio(false)}
+                  disabled={generatingAudio}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+                >
+                  {generatingAudio ? <Loader2 size={12} className="animate-spin" /> : <Volume2 size={12} />}
+                  Gerar Áudio
+                </button>
+                <button
+                  onClick={() => generateAudio(true)}
+                  disabled={generatingAudio}
+                  className="flex items-center gap-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-xs font-medium px-3 py-1.5 rounded-lg"
+                >
+                  <RotateCcw size={12} />
+                  Regenerar
+                </button>
+              </div>
+            </div>
             {audioOptions.length === 0 ? (
-              <p className="text-gray-400 text-sm">Nenhum roteiro de áudio.</p>
+              <p className="text-gray-400 text-sm">Nenhum roteiro de áudio. Regenere a adaptação para criar roteiros.</p>
             ) : audioOptions.map((a, i) => (
-              <div key={a.id ?? i} className="bg-gray-50 rounded-lg p-4 mb-3">
-                <p className="text-xs text-gray-400 mb-1">Estilo: <span className="text-gray-600">{a.voice_style}</span></p>
-                <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans">{a.script}</pre>
+              <div key={a.id ?? i} className="border border-gray-200 rounded-xl p-4 mb-3 bg-white">
+                {/* Metadata row */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {a.voice && (
+                    <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 border border-purple-100 rounded-full px-2 py-0.5">
+                      <Music2 size={10} /> {a.voice}
+                    </span>
+                  )}
+                  {a.rhythm != null && (
+                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5">
+                      {a.rhythm}×
+                    </span>
+                  )}
+                  {a.voice_style && (
+                    <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{a.voice_style}</span>
+                  )}
+                  {a.audio_url && (
+                    <span className="text-xs bg-green-50 text-green-700 border border-green-100 rounded-full px-2 py-0.5">✓ Gerado</span>
+                  )}
+                </div>
+
+                {/* Audio player */}
+                {a.audio_url && (
+                  <div className="mb-3">
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <audio controls src={a.audio_url} className="w-full h-9 rounded-lg" />
+                  </div>
+                )}
+
+                {/* Script com marcadores */}
+                <div className="mb-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Roteiro (com marcadores pedagógicos)</p>
+                  <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans bg-gray-50 rounded-lg p-3 leading-relaxed">{a.script}</pre>
+                </div>
+
+                {/* TTS script se diferente do script */}
+                {a.tts_script && a.tts_script !== a.script && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Enviado ao TTS (sem marcadores)</p>
+                    <pre className="text-xs text-gray-500 whitespace-pre-wrap font-sans bg-gray-50 rounded-lg p-2">{a.tts_script}</pre>
+                  </div>
+                )}
               </div>
             ))}
           </div>
