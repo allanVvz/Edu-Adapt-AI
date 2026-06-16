@@ -223,7 +223,7 @@ export default function ActivitiesPage() {
 
   function getActivityAdaptationsForProfile(activityId: string, profileId: string): Adaptation[] {
     return (actAdaptations[activityId] || []).filter(
-      (a: Adaptation & { profile?: { id: string } }) => a.profile?.id === profileId
+      (a) => a.profile?.id === profileId
     );
   }
 

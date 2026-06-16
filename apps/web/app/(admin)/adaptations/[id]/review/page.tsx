@@ -277,7 +277,7 @@ export default function ReviewPage() {
   const previewAudio = audioOptions[0];
 
   const interactionItems = interactionOptions.flatMap((io) =>
-    (io.items || []).filter((it) => typeof it !== "string" && (it as ImageOption).name)
+    (io.items || []).filter((it) => typeof it !== "string" && (it as unknown as { name?: string }).name)
       .map((it) => it as unknown as ImageOption & { name: string })
   );
 
