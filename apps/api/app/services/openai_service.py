@@ -23,8 +23,8 @@ IMAGE_STYLES: dict[str, dict] = {
     },
 }
 
-# gpt-image-1 is the recommended model since April 2025; dall-e-2 was deprecated Nov 2024
-VALID_IMAGE_MODELS = {"gpt-image-1", "dall-e-3"}
+# gpt-image-1 is the only supported model; dall-e-2 deprecated Nov 2024, dall-e-3 removed 2025
+VALID_IMAGE_MODELS = {"gpt-image-1"}
 
 _STATIC_DIR = "/app/static/images"
 _AUDIO_DIR = "/app/static/audio"
@@ -500,4 +500,6 @@ Responda SOMENTE com JSON válido:
         return result
     except Exception:
         from ..agents.orchestrator import run_adaptation_pipeline
-        return await run_adaptation_pipeline(activity, profile, openai_key=None)
+        result = await run_adaptation_pipeline(activity, profile, openai_key=None)
+        result["_fallback"] = True
+        return result

@@ -167,7 +167,8 @@ async def adapt_activity(
 
     openai_key = get_user_openai_key(session, current_user.id)
     output = await run_adaptation_pipeline(activity_dict, profile_dict, openai_key)
-    generated_by = "openai" if openai_key else "mock"
+    used_fallback = output.pop("_fallback", False)
+    generated_by = "openai" if (openai_key and not used_fallback) else "mock"
 
     adaptation = ActivityAdaptation(
         id=str(uuid.uuid4()),
