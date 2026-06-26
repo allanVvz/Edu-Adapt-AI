@@ -3,6 +3,8 @@ apps/api/static/images/*.png
 apps/api/static/images/*.jpg
 apps/api/static/images/*.jpeg
 !apps/api/static/images/.gitkeep
+apps/api/static/audio/*.mp3
+!apps/api/static/audio/.gitkeep
 
 # Python
 __pycache__/

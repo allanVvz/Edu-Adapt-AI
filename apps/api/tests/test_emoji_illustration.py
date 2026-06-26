@@ -13,6 +13,7 @@ from app.services.openai_service import _mock_adaptation, _build_image_option
 from app.models.activity import Activity
 from app.models.adaptation import ActivityAdaptation
 from app.models.api_key import ApiKey
+from app.services.icon_symbol_service import find_icon_symbol, seed_default_icon_symbols
 from .conftest import create_user, get_token, auth
 
 # ─── Lookup tests ─────────────────────────────────────────────────────────────
@@ -68,6 +69,13 @@ def test_multiple_disciplines_covered():
     assert get_emoji_for_concept("sapo") is not None         # Ciências AT-CIE-03
     assert get_emoji_for_concept("bebê") is not None         # História AT-HIS-01
     assert get_emoji_for_concept("avião") is not None        # Geografia AT-GEO-05
+
+
+def test_icon_symbol_bank_resolves_seeded_terms(session):
+    seed_default_icon_symbols(session)
+    symbol = find_icon_symbol(session, "atividade com alface")
+    assert symbol is not None
+    assert symbol["symbol_type"] == "emoji"
 
 
 # ─── _build_image_option tests ────────────────────────────────────────────────
@@ -227,3 +235,63 @@ def test_generate_images_force_generates_emoji_slot(client, session, mock_dalle)
     # With force=true, both images should be generated
     instance = mock_dalle.return_value
     assert instance.images.generate.call_count == 2
+
+
+def test_generate_images_skips_interaction_item_with_icon_symbol(client, session, mock_dalle):
+    seed_default_icon_symbols(session)
+    teacher = create_user(session, role="teacher", suffix="_icon_item_skip")
+    token = get_token(client, teacher.email)
+
+    activity = Activity(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title="Icon Item Test",
+        statement="Associe.",
+        status="active",
+    )
+    session.add(activity)
+    session.flush()
+
+    adaptation = ActivityAdaptation(
+        id=str(uuid.uuid4()),
+        activity_id=activity.id,
+        generated_by="mock",
+        output_data={
+            "image_options": [],
+            "audio_options": [],
+            "interaction_options": [{
+                "type": "drag_and_drop",
+                "items": [{
+                    "name": "alface",
+                    "image_prompt": "simple educational illustration of alface",
+                    "prompts": {"cartoon_2d": "alface, cartoon", "line_art": "alface, line art"},
+                    "generated": {"cartoon_2d": {"image_url": None}, "line_art": {"image_url": None}},
+                    "active_style": "cartoon_2d",
+                    "image_url": None,
+                }],
+                "zones": [{"name": "Horta"}],
+            }],
+            "text_adaptations": [{"version": 1, "content": "texto"}],
+            "validation": {"approved": True},
+        },
+        status="review",
+        version=1,
+    )
+    session.add(adaptation)
+    session.add(ApiKey(
+        id=str(uuid.uuid4()),
+        user_id=teacher.id,
+        provider="openai",
+        key_name="test-key",
+        encrypted_value="sk-fake",
+        status="active",
+    ))
+    session.commit()
+
+    resp = client.post(
+        f"/adaptations/{adaptation.id}/generate-images",
+        json={"style": "cartoon_2d"},
+        headers=auth(token),
+    )
+    assert resp.status_code == 200
+    assert mock_dalle.return_value.images.generate.call_count == 0

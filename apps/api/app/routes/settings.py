@@ -102,11 +102,10 @@ async def test_api_key_images(
     if key.provider != "openai":
         raise HTTPException(status_code=400, detail="Teste de imagem é apenas para chaves OpenAI.")
 
-    from openai import AsyncOpenAI
-    from ..services.openai_service import IMAGE_STYLES, _parse_image_error, _save_image
+    from ..services.openai_service import IMAGE_STYLES, _parse_image_error, _save_image, make_openai_client
 
     image_model = next(iter(IMAGE_STYLES.values()))["model"]
-    client = AsyncOpenAI(api_key=key.encrypted_value)
+    client = make_openai_client(key.encrypted_value)
 
     try:
         resp = await client.images.generate(

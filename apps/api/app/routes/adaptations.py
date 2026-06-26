@@ -10,8 +10,9 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
-from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier, generate_audio_tts
+from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier, generate_audio_tts, make_openai_client
 from ..models.gallery_image import GalleryImage
+from ..services.icon_symbol_service import apply_icon_symbol, find_icon_symbol, normalize_term
 import uuid
 
 router = APIRouter(prefix="/adaptations", tags=["adaptations"])
@@ -235,11 +236,10 @@ async def generate_images(
     if not openai_key:
         raise HTTPException(status_code=400, detail="Chave OpenAI não configurada. Acesse Configurações → Chaves de API.")
 
-    from openai import AsyncOpenAI
     import copy
     from datetime import datetime
 
-    client = AsyncOpenAI(api_key=openai_key)
+    client = make_openai_client(openai_key)
     style = body.style
     style_cfg = IMAGE_STYLES[style]
     model = style_cfg["model"]
@@ -268,6 +268,38 @@ async def generate_images(
             return f"{base_prompt}. {profile_modifier}"
         return base_prompt
 
+    def _slot_terms(*values: Optional[str]) -> str:
+        return " ".join(str(v) for v in values if v)
+
+    def _find_reusable_gallery_image(description: str, prompt: str) -> Optional[str]:
+        needle = normalize_term(f"{description} {prompt}")
+        if not needle:
+            return None
+        images = session.exec(select(GalleryImage).where(GalleryImage.style == style).limit(300)).all()
+        if not images:
+            images = session.exec(select(GalleryImage).limit(300)).all()
+        for gallery_img in images:
+            haystack = normalize_term(f"{gallery_img.description or ''} {gallery_img.prompt or ''}")
+            if not haystack:
+                continue
+            if needle in haystack or haystack in needle:
+                return gallery_img.image_url
+            if any(len(part) > 3 and part in haystack for part in needle.split()):
+                return gallery_img.image_url
+        return None
+
+    def _set_reused_image(slot: dict, url: str, prompt: str) -> None:
+        if "generated" not in slot or not isinstance(slot["generated"], dict):
+            slot["generated"] = {}
+        slot["generated"][style] = {
+            "image_url": url,
+            "generated_at": datetime.utcnow().isoformat(),
+            "prompt_used": prompt,
+            "source": "gallery_reuse",
+        }
+        if slot.get("active_style", "cartoon_2d") == style:
+            slot["image_url"] = url
+
     def _save_to_gallery(url: str, description: str, prompt: str) -> None:
         gallery_img = GalleryImage(
             image_url=url,
@@ -282,8 +314,11 @@ async def generate_images(
         session.add(gallery_img)
 
     for img in output.get("image_options", []):
-        # Skip emoji-illustrated slots unless explicitly forced
-        if img.get("illustration_type") == "emoji" and not body.force:
+        symbol = find_icon_symbol(session, _slot_terms(img.get("description"), img.get("base_subject"), img.get("prompt")))
+        if symbol and not body.force:
+            apply_icon_symbol(img, symbol)
+        # Skip symbol-illustrated slots unless explicitly forced
+        if img.get("illustration_type") in {"emoji", "pictogram", "symbol"} and not body.force:
             continue
         already = (img.get("generated") or {}).get(style, {}).get("image_url")
         if already:
@@ -292,6 +327,10 @@ async def generate_images(
         if not base_prompt:
             continue
         prompt = _build_prompt(base_prompt)
+        reused_url = _find_reusable_gallery_image(img.get("description", ""), prompt)
+        if reused_url and not body.force:
+            _set_reused_image(img, reused_url, prompt)
+            continue
         try:
             resp = await client.images.generate(
                 model=model,
@@ -318,6 +357,11 @@ async def generate_images(
         for item in interaction.get("items", []):
             if not isinstance(item, dict):
                 continue
+            symbol = find_icon_symbol(session, _slot_terms(item.get("name"), item.get("image_prompt")))
+            if symbol and not body.force:
+                apply_icon_symbol(item, symbol)
+            if item.get("illustration_type") in {"emoji", "pictogram", "symbol"} and not body.force:
+                continue
             already = (item.get("generated") or {}).get(style, {}).get("image_url")
             if already:
                 continue
@@ -325,6 +369,10 @@ async def generate_images(
             if not base_prompt:
                 continue
             prompt = _build_prompt(base_prompt)
+            reused_url = _find_reusable_gallery_image(item.get("name", ""), prompt)
+            if reused_url and not body.force:
+                _set_reused_image(item, reused_url, prompt)
+                continue
             try:
                 resp = await client.images.generate(
                     model=model,
@@ -433,7 +481,6 @@ async def regenerate_image(
         raise HTTPException(status_code=400, detail="Chave OpenAI não configurada.")
 
     import copy
-    from openai import AsyncOpenAI
     from datetime import datetime
 
     style_cfg = IMAGE_STYLES[body.style]
@@ -466,7 +513,7 @@ async def regenerate_image(
     feedback_trimmed = body.feedback.strip()
     modified_prompt = f"{base_prompt}. {feedback_trimmed}" if feedback_trimmed else base_prompt
 
-    client = AsyncOpenAI(api_key=openai_key)
+    client = make_openai_client(openai_key)
     try:
         resp = await client.images.generate(
             model=model,
@@ -564,7 +611,7 @@ async def generate_audio(
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
-    """Generate TTS audio for all audio_options scripts using OpenAI tts-1.
+    """Generate TTS audio for all audio_options scripts using OpenAI Speech API.
 
     Skips slots where audio_url is already set unless force=true.
     """

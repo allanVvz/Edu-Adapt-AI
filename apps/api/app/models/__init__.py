@@ -7,6 +7,7 @@ from .attempt import StudentActivityAttempt
 from .api_key import ApiKey
 from .agent_run import AgentRun
 from .gallery_image import GalleryImage
+from .icon_symbol import IconSymbol
 
 __all__ = [
     "User",
@@ -19,4 +20,5 @@ __all__ = [
     "ApiKey",
     "AgentRun",
     "GalleryImage",
+    "IconSymbol",
 ]

@@ -194,6 +194,17 @@ def test_generate_audio_tts_clamps_speed_high(mock_tts, tmp_path, monkeypatch):
     asyncio.run(generate_audio_tts("sk-fake", "texto", "alloy", speed=10.0))  # clamped to 4.0
 
 
+def test_generate_audio_tts_uses_current_speech_model(mock_tts, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.openai_service._AUDIO_DIR", str(tmp_path))
+    monkeypatch.setattr("app.services.openai_service._API_BASE_URL", "http://test")
+    monkeypatch.setattr("app.services.openai_service.TTS_MODEL", "gpt-4o-mini-tts")
+    asyncio.run(generate_audio_tts("sk-fake", "texto", "alloy", speed=1.0))
+    kwargs = mock_tts.return_value.audio.speech.create.call_args.kwargs
+    assert kwargs["model"] == "gpt-4o-mini-tts"
+    assert kwargs["response_format"] == "mp3"
+    assert "instructions" in kwargs
+
+
 # ─── Integration: generate-audio endpoint ─────────────────────────────────────
 
 def _seed_adaptation_with_audio_key(session, teacher_id: str) -> ActivityAdaptation:

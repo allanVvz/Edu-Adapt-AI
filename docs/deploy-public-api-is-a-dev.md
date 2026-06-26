@@ -9,7 +9,7 @@ Usuário
 Vercel (frontend Next.js)
   │  NEXT_PUBLIC_API_URL=https://eduadapt-api.is-a.dev
   ▼
-is-a.dev DNS → CNAME → eduadapt-api.ngrok-free.app
+is-a.dev DNS → CNAME → musicologically-unburned-glennie.ngrok-free.dev
   │
   ▼
 ngrok tunnel (na sua máquina ou servidor)
@@ -46,7 +46,7 @@ curl http://localhost:8000/health
 
 1. Acesse [ngrok.com](https://ngrok.com) → crie conta gratuita
 2. No dashboard → **Domains** → **New Domain**
-   - Escolha um nome (ex: `eduadapt-api`) → domínio gerado: `eduadapt-api.ngrok-free.app`
+   - Escolha um nome (ex: `eduadapt-api`) → domínio gerado: `musicologically-unburned-glennie.ngrok-free.dev`
    - Cada conta tem direito a **1 domínio estático gratuito**
 3. Copie o auth token em **Your Authtoken**
 4. Configure o token:
@@ -55,21 +55,21 @@ curl http://localhost:8000/health
    ```
 5. Suba o tunnel:
    ```bash
-   ngrok http --domain=eduadapt-api.ngrok-free.app 8000
+   ngrok http --domain=musicologically-unburned-glennie.ngrok-free.dev 8000
    ```
    Mantenha esse terminal aberto enquanto quiser o backend acessível.
 
 6. Valide:
    ```bash
-   curl https://eduadapt-api.ngrok-free.app/health
+   curl https://musicologically-unburned-glennie.ngrok-free.dev/health
    # ou use o script:
-   ./scripts/validate-public-api.sh https://eduadapt-api.ngrok-free.app
+   ./scripts/validate-public-api.sh https://musicologically-unburned-glennie.ngrok-free.dev
    ```
 
 ## Passo 3 — Registrar is-a.dev
 
 > ⏱️ O PR no is-a.dev leva **1–7 dias** para ser revisado e aprovado.
-> Enquanto isso, use `eduadapt-api.ngrok-free.app` diretamente na Vercel.
+> Enquanto isso, use `musicologically-unburned-glennie.ngrok-free.dev` diretamente na Vercel.
 
 1. Fork o repositório [is-a-dev/register](https://github.com/is-a-dev/register) no GitHub
 2. No seu fork, crie o arquivo `domains/eduadapt-api.json`:
@@ -82,7 +82,7 @@ curl http://localhost:8000/health
        "email": "allanulise027@gmail.com"
      },
      "record": {
-       "CNAME": "eduadapt-api.ngrok-free.app"
+       "CNAME": "musicologically-unburned-glennie.ngrok-free.dev"
      }
    }
    ```
@@ -98,7 +98,7 @@ Antes de expor o backend, configure as variáveis de ambiente:
 # No shell onde o Docker roda, ou via arquivo .env na raiz
 export CORS_ORIGINS="http://localhost:3000,https://seu-dominio.vercel.app"
 export CORS_ORIGIN_REGEX="https://[a-z0-9-]+\.vercel\.app"
-export API_BASE_URL="https://eduadapt-api.ngrok-free.app"
+export API_BASE_URL="https://musicologically-unburned-glennie.ngrok-free.dev"
 # Após is-a.dev ser aprovado:
 # export API_BASE_URL="https://eduadapt-api.is-a.dev"
 
@@ -113,7 +113,7 @@ Ou via arquivo `.env` (copiar de `.env.prod.example`).
 2. Adicione:
    ```
    Nome:  NEXT_PUBLIC_API_URL
-   Valor: https://eduadapt-api.ngrok-free.app
+   Valor: https://musicologically-unburned-glennie.ngrok-free.dev
    ```
    (após is-a.dev ser aprovado, troque para `https://eduadapt-api.is-a.dev`)
 3. Clique em **Save**
@@ -124,10 +124,10 @@ Ou via arquivo `.env` (copiar de `.env.prod.example`).
 
 ```bash
 # 1. Validar o backend público
-./scripts/validate-public-api.sh https://eduadapt-api.ngrok-free.app
+./scripts/validate-public-api.sh https://musicologically-unburned-glennie.ngrok-free.dev
 
 # 2. Testar login via curl
-curl -X POST https://eduadapt-api.ngrok-free.app/auth/login \
+curl -X POST https://musicologically-unburned-glennie.ngrok-free.dev/auth/login \
   -d "username=admin@eduadapt.com&password=admin1234" \
   -H "Content-Type: application/x-www-form-urlencoded"
 

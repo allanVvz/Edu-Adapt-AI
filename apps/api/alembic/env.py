@@ -8,7 +8,7 @@ from sqlmodel import SQLModel
 from app.models import (  # noqa: F401
     User, StudentProfile, Student, TeacherStudent,
     Activity, ActivityAdaptation, StudentActivityAttempt,
-    ApiKey, AgentRun, GalleryImage,
+    ApiKey, AgentRun, GalleryImage, IconSymbol,
 )
 
 config = context.config

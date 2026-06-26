@@ -26,6 +26,8 @@ O professor cadastra uma atividade. O sistema gera até 4 versões da mesma ativ
 
 ## Início rápido
 
+Guia detalhado para subir localmente com Docker: [`docs/subir-local-docker.md`](docs/subir-local-docker.md)
+
 ```bash
 # 1. Subir todos os serviços
 make up

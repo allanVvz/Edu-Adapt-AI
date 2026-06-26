@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 from ..database import engine
 from ..models import User, StudentProfile, Student, TeacherStudent, Activity
 from ..services.auth_service import hash_password
+from ..services.icon_symbol_service import seed_default_icon_symbols
 
 TEA_PROFILE_PREFIX = "TEA —"
 
@@ -17,6 +18,7 @@ def run():
         _seed_profiles(session)
         _seed_students(session)
         _seed_activities(session)
+        seed_default_icon_symbols(session)
 
     from .seed_tea_activities import run as run_tea
     run_tea()

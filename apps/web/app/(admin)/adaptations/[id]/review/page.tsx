@@ -28,6 +28,16 @@ const label = (v: ActivityItem | ActivityZone): string => {
   return v.name || (v as Record<string, string>).description || "";
 };
 
+const errorText = (err: unknown): string => {
+  if (!err) return "Erro desconhecido.";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const obj = err as { error?: unknown; detail?: unknown; message?: unknown };
+    return errorText(obj.error ?? obj.detail ?? obj.message ?? JSON.stringify(err));
+  }
+  return String(err);
+};
+
 interface ImageOption {
   id: string;
   description: string;
@@ -38,8 +48,9 @@ interface ImageOption {
   is_active?: boolean;
   image_url?: string | null;
   prompt?: string;
-  illustration_type?: "emoji" | "generated";
+  illustration_type?: "emoji" | "pictogram" | "symbol" | "generated";
   emoji?: string;
+  symbol?: string;
 }
 
 interface AudioOption {
@@ -209,9 +220,9 @@ export default function ReviewPage() {
     setGeneratingAudio(true);
     try {
       const result = await api.post(`/adaptations/${id}/generate-audio${force ? "?force=true" : ""}`);
-      const { generated, errors } = result.data as { generated: number; errors: string[] };
+      const { generated, errors } = result.data as { generated: number; errors: unknown[] };
       if (errors && errors.length > 0) {
-        toast.error(`Erro ao gerar áudio: ${errors[0]}`);
+        toast.error(`Erro ao gerar áudio: ${errorText(errors[0])}`, { duration: 10000 });
       } else if (generated === 0) {
         toast("Áudio já gerado. Use Regenerar para sobrescrever.", { icon: "ℹ️" });
       } else {
@@ -537,12 +548,12 @@ export default function ReviewPage() {
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Imagens da atividade</p>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {imageOptions.map((img) => {
-                        if (img.illustration_type === "emoji") {
+                        if (img.illustration_type === "emoji" || img.illustration_type === "pictogram" || img.illustration_type === "symbol") {
                           return (
                             <div key={img.id} className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center">
-                              <div className="text-5xl mb-2 select-none">{img.emoji}</div>
+                              <div className="text-5xl mb-2 select-none">{img.emoji || img.symbol}</div>
                               <p className="text-xs font-medium text-gray-700">{img.description}</p>
-                              <p className="text-xs text-amber-600 mt-1">ilustração emoji</p>
+                              <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>
                               <button
                                 onClick={() => generateImagesForStyle(activeStyle)}
                                 disabled={!!generatingStyle}
@@ -574,6 +585,15 @@ export default function ReviewPage() {
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Itens da interação</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {interactionItems.map((item) => {
+                        if (item.illustration_type === "emoji" || item.illustration_type === "pictogram" || item.illustration_type === "symbol") {
+                          return (
+                            <div key={item.name} className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center">
+                              <div className="text-4xl mb-2 select-none">{item.emoji || item.symbol}</div>
+                              <p className="text-xs font-medium text-gray-700">{item.name}</p>
+                              <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>
+                            </div>
+                          );
+                        }
                         const generatedEntry = (item as unknown as ImageOption).generated?.[activeStyle];
                         const imageUrl = generatedEntry?.image_url || (item as unknown as ImageOption).image_url || null;
                         return (

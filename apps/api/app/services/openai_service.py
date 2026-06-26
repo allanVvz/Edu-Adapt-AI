@@ -29,6 +29,17 @@ VALID_IMAGE_MODELS = {"gpt-image-1"}
 _STATIC_DIR = "/app/static/images"
 _AUDIO_DIR = "/app/static/audio"
 _API_BASE_URL = _os.environ.get("API_BASE_URL", "http://localhost:8000")
+TTS_MODEL = _os.environ.get("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
+
+
+def make_openai_client(openai_key: str):
+    from openai import AsyncOpenAI
+    verify_ssl = _os.environ.get("OPENAI_VERIFY_SSL", "true").lower() not in {"0", "false", "no"}
+    if verify_ssl:
+        return AsyncOpenAI(api_key=openai_key)
+
+    import httpx
+    return AsyncOpenAI(api_key=openai_key, http_client=httpx.AsyncClient(verify=False))
 
 
 def _save_image(resp_data) -> str:
@@ -273,7 +284,26 @@ def get_user_openai_key(session: Session, user_id: str) -> Optional[str]:
     return key.encrypted_value
 
 
-# ─── TTS (OpenAI tts-1) ───────────────────────────────────────────────────────
+# ─── TTS (OpenAI Speech API) ──────────────────────────────────────────────────
+
+def _parse_audio_error(error: str, api_key: str = "") -> str:
+    e = error.lower()
+    if "does not exist" in e or ("invalid_value" in e and "model" in e):
+        if api_key.startswith("sk-proj-"):
+            return (
+                "Modelo de audio nao habilitado para esta Project Key. "
+                "No painel da OpenAI, habilite o modelo gpt-4o-mini-tts no projeto ou use uma chave com acesso a Audio/Speech."
+            )
+        return "Modelo de audio nao disponivel para sua conta. Verifique acesso a Speech/TTS na OpenAI."
+    if "insufficient_quota" in e or ("quota" in e and "exceed" in e):
+        return "Cota OpenAI esgotada. Verifique saldo/uso no painel da OpenAI."
+    if "invalid_api_key" in e or "incorrect api key" in e:
+        return "Chave OpenAI invalida ou revogada."
+    if "billing" in e:
+        return "Problema de cobranca na conta OpenAI."
+    if "rate_limit" in e:
+        return "Limite de requisicoes atingido. Aguarde alguns segundos e tente novamente."
+    return error
 
 async def generate_audio_tts(
     openai_key: str,
@@ -281,15 +311,25 @@ async def generate_audio_tts(
     voice: str = "alloy",
     speed: float = 1.0,
 ) -> str:
-    """Call OpenAI TTS-1, save MP3 to disk, return /static/audio/{uuid}.mp3 URL."""
-    from openai import AsyncOpenAI
-    client = AsyncOpenAI(api_key=openai_key)
-    response = await client.audio.speech.create(
-        model="tts-1",
-        voice=voice,
-        input=tts_script or ".",
-        speed=max(0.25, min(4.0, float(speed))),
-    )
+    """Call OpenAI Speech API, save MP3 to disk, return /static/audio/{uuid}.mp3 URL."""
+    client = make_openai_client(openai_key)
+    clean_speed = max(0.25, min(4.0, float(speed)))
+    kwargs = {
+        "model": TTS_MODEL,
+        "voice": voice,
+        "input": tts_script or ".",
+        "speed": clean_speed,
+        "response_format": "mp3",
+    }
+    if TTS_MODEL not in {"tts-1", "tts-1-hd"}:
+        kwargs["instructions"] = (
+            "Fale em portugues do Brasil, com diccao clara, tom acolhedor e ritmo adequado "
+            "para estudante com TEA. Respeite pausas naturais e evite entonacao exagerada."
+        )
+    try:
+        response = await client.audio.speech.create(**kwargs)
+    except Exception as exc:
+        raise RuntimeError(_parse_audio_error(str(exc), openai_key)) from exc
     _os.makedirs(_AUDIO_DIR, exist_ok=True)
     filename = f"{_uuid_mod.uuid4()}.mp3"
     path = f"{_AUDIO_DIR}/{filename}"
@@ -371,9 +411,8 @@ def _profile_to_tea_variant(profile: dict) -> dict:
 
 async def generate_adaptation_with_ai(openai_key: str, activity: dict, profile: dict) -> dict:
     try:
-        from openai import AsyncOpenAI
         import json
-        client = AsyncOpenAI(api_key=openai_key)
+        client = make_openai_client(openai_key)
 
         def _fmt(val) -> str:
             if val is None or val == "":

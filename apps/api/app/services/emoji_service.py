@@ -26,6 +26,7 @@ CONCEPT_EMOJI: dict[str, str] = {
     "gato": "🐱",
     "cachorro": "🐶",
     "peixe": "🐟",
+    "golfinho": "🐬",
     "pássaro": "🐦",
     "passaro": "🐦",
     "sapo": "🐸",
@@ -49,6 +50,7 @@ CONCEPT_EMOJI: dict[str, str] = {
     "raiz": "🌱",
     "caule": "🌿",
     "mar": "🌊",
+    "oceano": "🌊",
     "rio": "🏞️",
     "pedra": "🪨",
     # ── Transporte ───────────────────────────────────────────────────────────
@@ -72,6 +74,7 @@ CONCEPT_EMOJI: dict[str, str] = {
     "predio": "🏢",
     "ponte": "🌉",
     "parque": "🏞️",
+    "casa": "🏠",
     "praça": "🏡",
     "praca": "🏡",
     "lixeira": "🗑️",
