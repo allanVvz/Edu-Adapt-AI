@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import StudentLayout from "@/components/layout/StudentLayout";
 import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
-import { BookOpen, Clock } from "lucide-react";
+import { BookOpen, Clock, Download } from "lucide-react";
 
 interface ActivityItem {
   id: string;
@@ -19,6 +19,7 @@ export default function StudentPage() {
   const [userName, setUserName] = useState("");
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const user = getUser();
@@ -32,8 +33,39 @@ export default function StudentPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  async function handleExportAllPDF() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await api.get("/student/activities/export-all-pdf", { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "minhas_atividades.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Não foi possível gerar o PDF. Tente novamente.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const exportButton = (
+    <button
+      onClick={handleExportAllPDF}
+      disabled={exporting || activities.length === 0}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      <Download size={14} />
+      {exporting ? "Gerando..." : "Exportar PDF"}
+    </button>
+  );
+
   return (
-    <StudentLayout>
+    <StudentLayout headerAction={exportButton}>
       <div className="mb-6">
         <h1 className="text-xl font-bold text-gray-900">Olá, {userName || "..."}! 👋</h1>
         <p className="text-sm text-gray-500">Suas atividades de hoje estão aqui.</p>

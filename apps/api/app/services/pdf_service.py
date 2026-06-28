@@ -23,6 +23,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     HRFlowable,
     Image,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -63,8 +64,19 @@ class AdaptationPDFRenderer:
 
     # ─── Public ───────────────────────────────────────────────────────────────
 
+    def build_story(self) -> list[Any]:
+        """Return the list of ReportLab flowables for this adaptation (no document wrapper)."""
+        story: list[Any] = []
+        story.extend(self._draw_header())
+        story.extend(self._draw_text_adaptations())
+        story.extend(self._draw_instructions())
+        story.extend(self._draw_images())
+        story.extend(self._draw_interaction())
+        story.extend(self._draw_teacher_script())
+        return story
+
     def render(self) -> bytes:
-        """Build and return the PDF as raw bytes."""
+        """Build and return the PDF as raw bytes (single activity)."""
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
             buf,
@@ -76,14 +88,7 @@ class AdaptationPDFRenderer:
             title=self._title,
             author="EduAdapt AI",
         )
-        story: list[Any] = []
-        story.extend(self._draw_header())
-        story.extend(self._draw_text_adaptations())   # contexto/leitura antes da tarefa
-        story.extend(self._draw_instructions())
-        story.extend(self._draw_images())
-        story.extend(self._draw_interaction())
-        story.extend(self._draw_teacher_script())
-        doc.build(story)
+        doc.build(self.build_story())
         return buf.getvalue()
 
     # ─── Section renderers ────────────────────────────────────────────────────
@@ -351,6 +356,30 @@ class AdaptationPDFRenderer:
         if relative.startswith("static/"):
             return os.path.join(self._static_dir, relative[len("static/"):])
         return None
+
+
+def build_combined_pdf(renderers: list["AdaptationPDFRenderer"]) -> bytes:
+    """Merge multiple renderers into a single multi-page PDF, one activity per page."""
+    if not renderers:
+        return b""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=PAGE_MARGIN_PT,
+        rightMargin=PAGE_MARGIN_PT,
+        topMargin=PAGE_MARGIN_PT,
+        bottomMargin=PAGE_MARGIN_PT,
+        title="Atividades do Aluno",
+        author="EduAdapt AI",
+    )
+    full_story: list[Any] = []
+    for i, renderer in enumerate(renderers):
+        if i > 0:
+            full_story.append(PageBreak())
+        full_story.extend(renderer.build_story())
+    doc.build(full_story)
+    return buf.getvalue()
 
 
 # ─── Style factory (pure function — no side effects) ─────────────────────────

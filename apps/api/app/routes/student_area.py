@@ -12,7 +12,7 @@ from ..models.student_profile import StudentProfile
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
 from ..services.static_url_service import normalized_output_data
-from ..services.pdf_service import AdaptationPDFRenderer
+from ..services.pdf_service import AdaptationPDFRenderer, build_combined_pdf
 from ..services.pdf_constants import get_profile_config
 import uuid
 
@@ -122,6 +122,66 @@ def list_student_activities(
             "created_at": a.created_at,
         })
     return result
+
+
+@router.get("/activities/export-all-pdf")
+def export_all_activities_pdf(
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    """Generate a multi-page PDF with all published activities for the student."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+
+    profile_name: Optional[str] = None
+    if student.profile_id:
+        profile = session.get(StudentProfile, student.profile_id)
+        profile_name = profile.name if profile else None
+
+    if student.profile_id:
+        rows = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == student.profile_id,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+    else:
+        rows = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == None,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No published activities found for this student")
+
+    cfg = get_profile_config(profile_name)
+    renderers = []
+    for adaptation in rows:
+        if not adaptation.output_data:
+            continue
+        activity = session.get(Activity, adaptation.activity_id)
+        title = activity.title if activity else "Atividade"
+        discipline = activity.discipline if activity else None
+        renderers.append(AdaptationPDFRenderer(
+            output_data=adaptation.output_data,
+            activity_title=title,
+            config=cfg,
+            discipline=discipline,
+        ))
+
+    if not renderers:
+        raise HTTPException(status_code=404, detail="No activities with generated content found")
+
+    pdf_bytes = build_combined_pdf(renderers)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="minhas_atividades.pdf"'},
+    )
 
 
 @router.get("/activities/{adaptation_id}")
