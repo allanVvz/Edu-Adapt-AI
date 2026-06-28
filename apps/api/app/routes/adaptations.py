@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
@@ -11,6 +12,9 @@ from ..models.student_profile import StudentProfile
 from ..models.user import User
 from ..routes.auth import require_role
 from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier, generate_audio_tts, make_openai_client
+from ..services.static_url_service import normalized_output_data
+from ..services.pdf_service import AdaptationPDFRenderer
+from ..services.pdf_constants import get_profile_config
 from ..models.gallery_image import GalleryImage
 from ..services.icon_symbol_service import apply_icon_symbol, find_icon_symbol, normalize_term
 import uuid
@@ -59,6 +63,7 @@ def list_adaptations(
 @router.get("/{adaptation_id}")
 def get_adaptation(
     adaptation_id: str,
+    request: Request,
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
@@ -94,7 +99,7 @@ def get_adaptation(
         "generated_by": adaptation.generated_by,
         "status": adaptation.status,
         "version": adaptation.version,
-        "output": adaptation.output_data,
+        "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
         "validator_feedback": adaptation.validator_feedback,
         "teacher_feedback": adaptation.teacher_feedback,
         "created_at": adaptation.created_at,
@@ -208,8 +213,11 @@ async def reprocess_adaptation(
     return {"id": new_adaptation.id, "version": new_adaptation.version, "status": new_adaptation.status}
 
 
+DEFAULT_IMAGE_STYLE = "pictogram"
+
+
 class GenerateImagesRequest(BaseModel):
-    style: str = "cartoon_2d"
+    style: str = DEFAULT_IMAGE_STYLE
     force: bool = False
 
 
@@ -233,20 +241,20 @@ async def generate_images(
         raise HTTPException(status_code=404, detail="Adaptation not found")
 
     openai_key = get_user_openai_key(session, current_user.id)
-    if not openai_key:
+    if body.style != "pictogram" and not openai_key:
         raise HTTPException(status_code=400, detail="Chave OpenAI não configurada. Acesse Configurações → Chaves de API.")
 
     import copy
     from datetime import datetime
 
-    client = make_openai_client(openai_key)
+    client = make_openai_client(openai_key) if body.style != "pictogram" and openai_key else None
     style = body.style
     style_cfg = IMAGE_STYLES[style]
     model = style_cfg["model"]
     size = style_cfg["size"]
 
     # Guard: reject if model is not in the known-valid list
-    if model not in VALID_IMAGE_MODELS:
+    if body.style != "pictogram" and model not in VALID_IMAGE_MODELS:
         raise HTTPException(
             status_code=500,
             detail=f"Modelo de imagem '{model}' não é suportado. Modelos válidos: {sorted(VALID_IMAGE_MODELS)}"
@@ -297,8 +305,21 @@ async def generate_images(
             "prompt_used": prompt,
             "source": "gallery_reuse",
         }
-        if slot.get("active_style", "cartoon_2d") == style:
+        if slot.get("active_style", DEFAULT_IMAGE_STYLE) == style:
             slot["image_url"] = url
+
+    def _set_pictogram(slot: dict, symbol: dict) -> None:
+        apply_icon_symbol(slot, symbol)
+        slot["active_style"] = "pictogram"
+        if "generated" not in slot or not isinstance(slot["generated"], dict):
+            slot["generated"] = {}
+        slot["generated"]["pictogram"] = {
+            "image_url": None,
+            "generated_at": datetime.utcnow().isoformat(),
+            "symbol": symbol.get("symbol"),
+            "symbol_type": symbol.get("symbol_type"),
+            "source": symbol.get("source"),
+        }
 
     def _save_to_gallery(url: str, description: str, prompt: str) -> None:
         gallery_img = GalleryImage(
@@ -315,6 +336,10 @@ async def generate_images(
 
     for img in output.get("image_options", []):
         symbol = find_icon_symbol(session, _slot_terms(img.get("description"), img.get("base_subject"), img.get("prompt")))
+        if style == "pictogram" and symbol and not body.force:
+            _set_pictogram(img, symbol)
+            generated_count += 1
+            continue
         if symbol and not body.force:
             apply_icon_symbol(img, symbol)
         # Skip symbol-illustrated slots unless explicitly forced
@@ -331,6 +356,8 @@ async def generate_images(
         if reused_url and not body.force:
             _set_reused_image(img, reused_url, prompt)
             continue
+        if style == "pictogram":
+            continue
         try:
             resp = await client.images.generate(
                 model=model,
@@ -346,7 +373,7 @@ async def generate_images(
                 "generated_at": datetime.utcnow().isoformat(),
                 "prompt_used": prompt,
             }
-            if img.get("active_style", "cartoon_2d") == style:
+            if img.get("active_style", DEFAULT_IMAGE_STYLE) == style:
                 img["image_url"] = url
             _save_to_gallery(url, img.get("description", "Imagem da atividade"), prompt)
             generated_count += 1
@@ -357,7 +384,11 @@ async def generate_images(
         for item in interaction.get("items", []):
             if not isinstance(item, dict):
                 continue
-            symbol = find_icon_symbol(session, _slot_terms(item.get("name"), item.get("image_prompt")))
+            symbol = find_icon_symbol(session, _slot_terms(item.get("name"), item.get("description"), item.get("image_prompt")))
+            if style == "pictogram" and symbol and not body.force:
+                _set_pictogram(item, symbol)
+                generated_count += 1
+                continue
             if symbol and not body.force:
                 apply_icon_symbol(item, symbol)
             if item.get("illustration_type") in {"emoji", "pictogram", "symbol"} and not body.force:
@@ -372,6 +403,8 @@ async def generate_images(
             reused_url = _find_reusable_gallery_image(item.get("name", ""), prompt)
             if reused_url and not body.force:
                 _set_reused_image(item, reused_url, prompt)
+                continue
+            if style == "pictogram":
                 continue
             try:
                 resp = await client.images.generate(
@@ -388,9 +421,9 @@ async def generate_images(
                     "generated_at": datetime.utcnow().isoformat(),
                     "prompt_used": prompt,
                 }
-                if item.get("active_style", "cartoon_2d") == style:
+                if item.get("active_style", DEFAULT_IMAGE_STYLE) == style:
                     item["image_url"] = url
-                _save_to_gallery(url, item.get("name", "Item de interação"), prompt)
+                _save_to_gallery(url, item.get("name") or item.get("description") or "Item de interação", prompt)
                 generated_count += 1
             except Exception as e:
                 errors.append({"id": item.get("name", "?"), "error": _parse_image_error(str(e), openai_key)})
@@ -406,6 +439,7 @@ class ApplyGalleryImageRequest(BaseModel):
     slot_id: str
     image_url: str
     gallery_image_id: Optional[str] = None
+    style: Optional[str] = None
 
 
 @router.post("/{adaptation_id}/apply-gallery-image")
@@ -422,11 +456,22 @@ def apply_gallery_image(
     import copy
     output = copy.deepcopy(adaptation.output_data or {})
 
+    selected_style = body.style
+    if body.gallery_image_id:
+        gallery_image = session.get(GalleryImage, body.gallery_image_id)
+        if gallery_image and gallery_image.style:
+            selected_style = gallery_image.style
+    selected_style = selected_style or DEFAULT_IMAGE_STYLE
+
     if body.slot_type == "image_option":
         for img in output.get("image_options", []):
             if img.get("id") == body.slot_id:
                 img["image_url"] = body.image_url
-                active_style = img.get("active_style", "cartoon_2d")
+                img["active_style"] = selected_style
+                img["illustration_type"] = "generated"
+                img.pop("emoji", None)
+                img.pop("symbol", None)
+                active_style = selected_style
                 if "generated" not in img or not isinstance(img.get("generated"), dict):
                     img["generated"] = {}
                 if active_style not in img["generated"] or not isinstance(img["generated"].get(active_style), dict):
@@ -441,7 +486,11 @@ def apply_gallery_image(
                     continue
                 if item.get("name") == body.slot_id:
                     item["image_url"] = body.image_url
-                    active_style = item.get("active_style", "cartoon_2d")
+                    item["active_style"] = selected_style
+                    item["illustration_type"] = "generated"
+                    item.pop("emoji", None)
+                    item.pop("symbol", None)
+                    active_style = selected_style
                     if "generated" not in item or not isinstance(item.get("generated"), dict):
                         item["generated"] = {}
                     if active_style not in item["generated"] or not isinstance(item["generated"].get(active_style), dict):
@@ -458,7 +507,7 @@ def apply_gallery_image(
 class RegenerateImageRequest(BaseModel):
     slot_type: str  # "image_option" | "interaction_item"
     slot_id: str
-    style: str = "cartoon_2d"
+    style: str = DEFAULT_IMAGE_STYLE
     feedback: str = ""
 
 
@@ -471,6 +520,8 @@ async def regenerate_image(
 ):
     if body.style not in IMAGE_STYLES:
         raise HTTPException(status_code=400, detail=f"Estilo inválido: {body.style}")
+    if body.style == "pictogram":
+        raise HTTPException(status_code=400, detail="Pictograma usa a biblioteca de simbolos. Use Desenho ou Cartoon para gerar uma nova imagem com IA.")
 
     adaptation = session.get(ActivityAdaptation, adaptation_id)
     if not adaptation:
@@ -546,8 +597,11 @@ async def regenerate_image(
                 if "generated" not in img or not isinstance(img.get("generated"), dict):
                     img["generated"] = {}
                 img["generated"][body.style] = {"image_url": url, "generated_at": now_iso}
-                if img.get("active_style", "cartoon_2d") == body.style:
-                    img["image_url"] = url
+                img["active_style"] = body.style
+                img["illustration_type"] = "generated"
+                img.pop("emoji", None)
+                img.pop("symbol", None)
+                img["image_url"] = url
                 break
     elif body.slot_type == "interaction_item":
         for interaction in output.get("interaction_options", []):
@@ -556,8 +610,11 @@ async def regenerate_image(
                     if "generated" not in item or not isinstance(item.get("generated"), dict):
                         item["generated"] = {}
                     item["generated"][body.style] = {"image_url": url, "generated_at": now_iso}
-                    if item.get("active_style", "cartoon_2d") == body.style:
-                        item["image_url"] = url
+                    item["active_style"] = body.style
+                    item["illustration_type"] = "generated"
+                    item.pop("emoji", None)
+                    item.pop("symbol", None)
+                    item["image_url"] = url
                     break
 
     adaptation.output_data = output
@@ -607,6 +664,7 @@ def set_image_style(
 @router.post("/{adaptation_id}/generate-audio")
 async def generate_audio(
     adaptation_id: str,
+    request: Request,
     force: bool = False,
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
@@ -640,7 +698,7 @@ async def generate_audio(
         voice = opt.get("voice", "alloy")
         rhythm = float(opt.get("rhythm", 1.0))
         try:
-            url = await generate_audio_tts(openai_key, tts_script, voice, rhythm)
+            url = await generate_audio_tts(openai_key, tts_script, voice, rhythm, str(request.base_url).rstrip("/"))
             opt["audio_url"] = url
             generated_count += 1
         except Exception as exc:
@@ -655,3 +713,42 @@ async def generate_audio(
         "errors": errors,
         "audio_options": audio_options,
     }
+
+
+@router.get("/{adaptation_id}/pdf")
+def download_adaptation_pdf(
+    adaptation_id: str,
+    current_user=Depends(require_role("admin", "teacher")),
+    session: Session = Depends(get_session),
+):
+    """Generate and stream a WCAG-compliant A4 PDF for the given adaptation."""
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Adaptação não encontrada")
+    if not adaptation.output_data:
+        raise HTTPException(status_code=422, detail="Adaptação ainda não tem conteúdo gerado")
+
+    activity = session.get(Activity, adaptation.activity_id)
+    title = activity.title if activity else "Atividade"
+    discipline = activity.discipline if activity else None
+
+    profile_name: Optional[str] = None
+    if adaptation.student_profile_id:
+        profile = session.get(StudentProfile, adaptation.student_profile_id)
+        profile_name = profile.name if profile else None
+
+    cfg = get_profile_config(profile_name)
+    pdf_bytes = AdaptationPDFRenderer(
+        output_data=adaptation.output_data,
+        activity_title=title,
+        config=cfg,
+        discipline=discipline,
+    ).render()
+
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]
+    filename = f"atividade_{safe_title}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

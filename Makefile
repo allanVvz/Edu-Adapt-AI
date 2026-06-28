@@ -1,4 +1,4 @@
-.PHONY: test test-api test-web test-images test-images-e2e test-profiles test-web-health test-audio test-audio-e2e test-emoji cc lint pre-deploy up down logs
+.PHONY: test test-api test-web test-images test-images-e2e test-profiles test-web-health test-audio test-audio-e2e test-emoji test-pdf cc lint pre-deploy up down logs
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
 test: cc test-api test-web test-web-health
@@ -38,6 +38,10 @@ test-emoji:
 	@echo "=== Emoji Illustration Tests ==="
 	docker compose exec -T api python -m pytest tests/test_emoji_illustration.py -v --tb=short
 
+test-pdf:
+	@echo "=== PDF Generation Tests (no OpenAI, no network) ==="
+	docker compose exec -T api python -m pytest tests/test_pdf_generation.py -v --tb=short
+
 test-images-e2e:
 	@echo "=== E2E Image Generation (real OpenAI API — requires OPENAI_TEST_API_KEY) ==="
 	@if [ -z "$(OPENAI_TEST_API_KEY)" ]; then \
@@ -76,6 +80,9 @@ lint:
 # Run tests outside Docker (requires local envs)
 test-local-api:
 	cd apps/api && python -m pytest tests/ -v --tb=short
+
+test-local-pdf:
+	cd apps/api && python -m pytest tests/test_pdf_generation.py -v --tb=short
 
 test-local-web:
 	cd apps/web && npm test -- --passWithNoTests --watchAll=false
