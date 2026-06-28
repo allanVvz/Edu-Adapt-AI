@@ -168,6 +168,50 @@ CONCEPT_EMOJI: dict[str, str] = {
     # ── Ação principal (AT-PORT-05) ───────────────────────────────────────────
     "bola": "⚽",
     "menino": "🧒",
+    # ── Animais da apostila ───────────────────────────────────────────────────
+    "coelho": "🐰",
+    "tartaruga": "🐢",
+    "rato": "🐭",
+    # ── Língua Portuguesa — pontuação / gramática ─────────────────────────────
+    "pontuação": "✏️",
+    "pontuacao": "✏️",
+    "diálogo": "💬",
+    "dialogo": "💬",
+    "texto": "📄",
+    "ortografia": "🔤",
+    "substantivo": "🏷️",
+    "adjetivo": "✨",
+    "verbo": "🏃",
+    "verbos": "🏃",
+    "sinônimo": "🔄",
+    "sinonimo": "🔄",
+    "antônimo": "↔️",
+    "antonimo": "↔️",
+    # ── Itens cotidianos ──────────────────────────────────────────────────────
+    "carta": "✉️",
+    "garrafa": "🍶",
+    "sabão": "🧼",
+    "sabao": "🧼",
+    "osso": "🦴",
+    # ── Tamanho / comparação ─────────────────────────────────────────────────
+    "grande": "🐘",
+    "pequeno": "🐁",
+    # ── Pessoas ───────────────────────────────────────────────────────────────
+    "menina": "👧",
+    "nome": "🏷️",
+    "cidade": "🏙️",
+    "brasil": "🇧🇷",
+    # ── Ações / verbos ────────────────────────────────────────────────────────
+    "brincar": "🎯",
+    "cantar": "🎤",
+    "correr": "🏃",
+    "passear": "🚶",
+    # ── Sentimentos / humor ───────────────────────────────────────────────────
+    "humor": "😄",
+    "bonito": "✨",
+    # ── Arte / Música ─────────────────────────────────────────────────────────
+    "música": "🎵",
+    "musica": "🎵",
 }
 
 
