@@ -23,6 +23,9 @@ def run():
     from .seed_tea_activities import run as run_tea
     run_tea()
 
+    from .seed_apostila_portugues import run as run_apostila
+    run_apostila()
+
 
 def _seed_users(session: Session):
     users = [
