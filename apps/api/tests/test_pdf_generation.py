@@ -58,13 +58,13 @@ FULL_OUTPUT_MC = {
         {
             "type": "multiple_choice",
             "instructions": "MARQUE O ANIMAL QUE VIVE NA ÁGUA.",
-            "items": [
+            "items": [{"name": "Qual animal vive na água?"}],
+            "zones": [
                 {"name": "Peixe"},
                 {"name": "Cachorro"},
                 {"name": "Passarinho"},
             ],
-            "zones": [],
-            "correct_answer": {"correct_zone": "A"},
+            "correct_answer": {"correct_zone": "Peixe"},
         }
     ],
     "print_version": {"format": "A4", "layout": "single_column"},

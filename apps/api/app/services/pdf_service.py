@@ -78,10 +78,11 @@ class AdaptationPDFRenderer:
         )
         story: list[Any] = []
         story.extend(self._draw_header())
+        story.extend(self._draw_text_adaptations())   # contexto/leitura antes da tarefa
         story.extend(self._draw_instructions())
         story.extend(self._draw_images())
         story.extend(self._draw_interaction())
-        story.extend(self._draw_audio_transcript())
+        story.extend(self._draw_teacher_script())
         doc.build(story)
         return buf.getvalue()
 
@@ -107,6 +108,36 @@ class AdaptationPDFRenderer:
             spaceAfter=14,
         ))
         return elements
+
+    def _draw_text_adaptations(self) -> list:
+        """Render the simplified reading/context text for the activity."""
+        raw = self._data.get("text_adaptations")
+        if not raw:
+            return []
+
+        content: Optional[str] = None
+        if isinstance(raw, list) and raw:
+            first = raw[0]
+            if isinstance(first, dict):
+                content = first.get("content") or first.get("text") or first.get("simplified")
+            else:
+                content = str(first)
+        elif isinstance(raw, dict):
+            content = (
+                raw.get("supported") or raw.get("simplified")
+                or raw.get("content") or raw.get("text")
+                or next(iter(raw.values()), None)
+            )
+        elif isinstance(raw, str):
+            content = raw
+
+        if not content:
+            return []
+
+        return [
+            Paragraph(content, self._styles["reading_text"]),
+            Spacer(1, 14),
+        ]
 
     def _draw_instructions(self) -> list:
         interactions = self._data.get("interaction_options", [])
@@ -169,14 +200,16 @@ class AdaptationPDFRenderer:
         elements: list[Any] = [
             Paragraph("ESCOLHA UMA RESPOSTA:", self._styles["section_label"]),
         ]
-        for idx, item in enumerate(interaction.get("items", [])):
-            name = _item_name(item)
+        # zones = the answer choices in MC; items[0] = the question subject (not rendered)
+        choices = interaction.get("zones", [])
+        for idx, zone in enumerate(choices):
+            name = _item_name(zone)
             label = chr(65 + idx)  # A, B, C …
             elements.append(Paragraph(
-                f"<b>({label})</b> {name}",
+                f"<b>({label})</b>  {name}",
                 self._styles["mc_option"],
             ))
-            elements.append(Spacer(1, 6))
+            elements.append(Spacer(1, 10))
         elements.append(Spacer(1, 14))
         return elements
 
@@ -246,7 +279,8 @@ class AdaptationPDFRenderer:
 
         return elements
 
-    def _draw_audio_transcript(self) -> list:
+    def _draw_teacher_script(self) -> list:
+        """Narration script at the bottom — for the teacher to read aloud to the child."""
         audio_opts = self._data.get("audio_options", [])
         if not audio_opts:
             return []
@@ -264,7 +298,7 @@ class AdaptationPDFRenderer:
                 spaceBefore=16,
                 spaceAfter=8,
             ),
-            Paragraph("TEXTO NARRADO:", self._styles["section_label"]),
+            Paragraph("ROTEIRO DO PROFESSOR:", self._styles["section_label"]),
             Paragraph(clean, self._styles["transcript"]),
         ]
 
@@ -290,18 +324,16 @@ class AdaptationPDFRenderer:
                 except Exception:
                     pass  # fall through to placeholder
 
-        # Placeholder box with description
+        # Empty picture-frame placeholder; description appears only as caption below
         box_style = TableStyle([
             ("BOX", (0, 0), (-1, -1), 1.5, colors.HexColor("#CCCCCC")),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F0F0F0")),
-            ("TOPPADDING", (0, 0), (-1, -1), 20),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 20),
         ])
         box_size = self._cfg.image_max_size
         placeholder = Table(
-            [[Paragraph(description, self._styles["placeholder"])]],
+            [[Paragraph("", self._styles["placeholder"])]],
             colWidths=[box_size],
             rowHeights=[box_size],
             style=box_style,
@@ -358,6 +390,14 @@ def _build_styles(cfg: PDFConfig) -> dict[str, ParagraphStyle]:
             fontSize=9,
             textColor=cfg.muted_color,
             spaceAfter=8,
+        ),
+        "reading_text": make(
+            "reading_text",
+            fontName=FONT,
+            fontSize=fs_b,
+            textColor=tc,
+            leading=fs_b * ls,
+            spaceAfter=6,
         ),
         "instruction": make(
             "instruction",
