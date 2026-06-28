@@ -14,9 +14,10 @@ import clsx from "clsx";
 
 const TABS = ["Texto", "Visual", "Imagens", "Áudio", "Interação", "Impressão", "Executar", "Validação"] as const;
 type Tab = (typeof TABS)[number];
-type ImageStyle = "line_art" | "cartoon_2d";
+type ImageStyle = "pictogram" | "line_art" | "cartoon_2d";
 
 const STYLE_LABELS: Record<ImageStyle, string> = {
+  pictogram: "Pictograma",
   line_art: "Desenho P&B — traços simples",
   cartoon_2d: "Cartoon colorido — detalhes 2D",
 };
@@ -42,8 +43,8 @@ interface ImageOption {
   id: string;
   description: string;
   base_subject?: string;
-  prompts?: Record<ImageStyle, string>;
-  generated?: Record<ImageStyle, { image_url: string | null; generated_at?: string | null }>;
+  prompts?: Partial<Record<ImageStyle, string>>;
+  generated?: Partial<Record<ImageStyle, { image_url: string | null; generated_at?: string | null; symbol?: string | null }>>;
   active_style?: ImageStyle;
   is_active?: boolean;
   image_url?: string | null;
@@ -96,7 +97,7 @@ export default function ReviewPage() {
   const [loading, setLoading] = useState(false);
 
   // Image management
-  const [activeStyle, setActiveStyle] = useState<ImageStyle>("cartoon_2d");
+  const [activeStyle, setActiveStyle] = useState<ImageStyle>("pictogram");
   const [generatingStyle, setGeneratingStyle] = useState<ImageStyle | null>(null);
   const [applyingStyle, setApplyingStyle] = useState(false);
 
@@ -196,7 +197,7 @@ export default function ReviewPage() {
     }
   }
 
-  async function handlePickerSelect(imageUrl: string, _galleryImageId: string) {
+  async function handlePickerSelect(imageUrl: string, _galleryImageId: string, style: ImageStyle | null) {
     if (!pickerSlot) return;
     setApplyingPick(true);
     try {
@@ -205,6 +206,7 @@ export default function ReviewPage() {
         slot_id: pickerSlot.slot_id,
         image_url: imageUrl,
         gallery_image_id: _galleryImageId,
+        style: style ?? activeStyle,
       });
       toast.success("Imagem substituída com sucesso!");
       load();
@@ -240,13 +242,15 @@ export default function ReviewPage() {
   async function handleRegenerate() {
     if (!regenSlot) return;
     setRegenerating(true);
+    const styleToGenerate: ImageStyle = activeStyle === "pictogram" ? "cartoon_2d" : activeStyle;
     try {
       await api.post(`/adaptations/${id}/regenerate-image`, {
         slot_type: regenSlot.slot_type,
         slot_id: regenSlot.slot_id,
-        style: activeStyle,
+        style: styleToGenerate,
         feedback: regenFeedback,
       });
+      setActiveStyle(styleToGenerate);
       toast.success("Nova imagem gerada e salva na galeria!");
       setRegenSlot(null);
       setRegenFeedback("");
@@ -292,7 +296,7 @@ export default function ReviewPage() {
       .map((it) => it as unknown as ImageOption & { name: string })
   );
 
-  const visualImages = imageOptions.filter((img) => img.is_active && img.image_url);
+  const visualImages = imageOptions.filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
 
   // Helper: renders image card with click-to-pick and regen controls
   function ImageCard({
@@ -384,6 +388,7 @@ export default function ReviewPage() {
         onClose={() => setPickerSlot(null)}
         onSelect={handlePickerSelect}
         currentImageUrl={pickerSlot?.current_url}
+        initialStyle={activeStyle}
       />
 
       {/* Applying overlay */}
@@ -490,13 +495,19 @@ export default function ReviewPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {visualImages.map((img) => (
                   <div key={img.id} className="text-center">
-                    <img
-                      src={img.image_url!}
-                      alt={img.description}
-                      className="w-full aspect-square object-cover rounded-xl border border-gray-100 shadow-sm"
-                    />
+                    {img.image_url ? (
+                      <img
+                        src={img.image_url}
+                        alt={img.description}
+                        className="w-full aspect-square object-cover rounded-xl border border-gray-100 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-full aspect-square rounded-xl border border-gray-100 shadow-sm bg-amber-50 flex items-center justify-center text-6xl">
+                        {img.emoji || img.symbol}
+                      </div>
+                    )}
                     <p className="text-xs text-gray-600 mt-2 font-medium">{img.description}</p>
-                    <p className="text-xs text-gray-400">{STYLE_LABELS[img.active_style ?? "cartoon_2d"]}</p>
+                    <p className="text-xs text-gray-400">{STYLE_LABELS[img.active_style ?? "pictogram"]}</p>
                   </div>
                 ))}
               </div>
@@ -550,12 +561,17 @@ export default function ReviewPage() {
                       {imageOptions.map((img) => {
                         if (img.illustration_type === "emoji" || img.illustration_type === "pictogram" || img.illustration_type === "symbol") {
                           return (
-                            <div key={img.id} className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center">
+                            <div
+                              key={img.id}
+                              onClick={() => setPickerSlot({ slot_type: "image_option", slot_id: img.id, current_url: img.image_url })}
+                              className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center cursor-pointer hover:border-purple-300 transition-colors"
+                              title="Clique para trocar pela galeria"
+                            >
                               <div className="text-5xl mb-2 select-none">{img.emoji || img.symbol}</div>
                               <p className="text-xs font-medium text-gray-700">{img.description}</p>
                               <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>
                               <button
-                                onClick={() => generateImagesForStyle(activeStyle)}
+                                onClick={(e) => { e.stopPropagation(); generateImagesForStyle(activeStyle); }}
                                 disabled={!!generatingStyle}
                                 className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 rounded-lg py-1 transition-colors disabled:opacity-50"
                               >
@@ -587,7 +603,12 @@ export default function ReviewPage() {
                       {interactionItems.map((item) => {
                         if (item.illustration_type === "emoji" || item.illustration_type === "pictogram" || item.illustration_type === "symbol") {
                           return (
-                            <div key={item.name} className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center">
+                            <div
+                              key={item.name}
+                              onClick={() => setPickerSlot({ slot_type: "interaction_item", slot_id: item.name, current_url: (item as unknown as ImageOption).image_url })}
+                              className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center cursor-pointer hover:border-purple-300 transition-colors"
+                              title="Clique para trocar pela galeria"
+                            >
                               <div className="text-4xl mb-2 select-none">{item.emoji || item.symbol}</div>
                               <p className="text-xs font-medium text-gray-700">{item.name}</p>
                               <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>

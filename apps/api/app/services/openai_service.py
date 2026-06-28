@@ -9,6 +9,12 @@ from .emoji_service import get_emoji_for_concept
 # ─── Style registry ───────────────────────────────────────────────────────────
 
 IMAGE_STYLES: dict[str, dict] = {
+    "pictogram": {
+        "label": "Pictograma - baixo uso de tokens",
+        "suffix": "AAC pictogram, single clear symbol, white background, thick outline, no extra details, communication board style",
+        "model": None,
+        "size": None,
+    },
     "line_art": {
         "label": "Desenho P&B — traços simples",
         "suffix": "simple black and white line drawing, educational, minimal clean lines, no color, sketch style, high contrast",
@@ -137,7 +143,7 @@ def _build_image_option(img_id: str, description: str, base_subject: str) -> dic
         "base_subject": base_subject,
         "prompts": _make_prompts(base_subject),
         "generated": _make_generated_slots(),
-        "active_style": "cartoon_2d",
+        "active_style": "pictogram",
         "is_active": True,
         "image_url": None,
     }
@@ -186,7 +192,7 @@ def _mock_adaptation(activity: dict, profile: dict) -> dict:
             "image_prompt": f"simple educational illustration of {name}, cartoon style",
             "prompts": _make_prompts(name),
             "generated": _make_generated_slots(),
-            "active_style": "cartoon_2d",
+            "active_style": "pictogram",
             "image_url": None,
         }
         for name in raw_items
@@ -202,7 +208,7 @@ def _mock_adaptation(activity: dict, profile: dict) -> dict:
             "image_prompt": "",
             "prompts": _make_prompts("student answer card"),
             "generated": _make_generated_slots(),
-            "active_style": "cartoon_2d",
+            "active_style": "pictogram",
             "image_url": None,
         }]
         zones = [{"name": r.strip()} for r in raw_items]
@@ -310,6 +316,7 @@ async def generate_audio_tts(
     tts_script: str,
     voice: str = "alloy",
     speed: float = 1.0,
+    api_base_url: str | None = None,
 ) -> str:
     """Call OpenAI Speech API, save MP3 to disk, return /static/audio/{uuid}.mp3 URL."""
     client = make_openai_client(openai_key)
@@ -335,7 +342,8 @@ async def generate_audio_tts(
     path = f"{_AUDIO_DIR}/{filename}"
     with open(path, "wb") as f:
         f.write(response.content)
-    return f"{_API_BASE_URL}/static/audio/{filename}"
+    base_url = (api_base_url or _API_BASE_URL).rstrip("/")
+    return f"{base_url}/static/audio/{filename}"
 
 
 # ─── Kernel-consistent generation (gpt-4o-mini) ──────────────────────────────
@@ -462,7 +470,7 @@ Marcadores de narração: {variant["marcadores"] or "nenhum"}
 
 INSTRUÇÕES DE ESTRUTURA:
 - interaction_options[0].type: "multiple_choice" | "drag_and_drop" | "sequencing"
-- items: lista de objetos com id, name, image_prompt (inglês), prompts (line_art+cartoon_2d), generated, active_style="cartoon_2d", image_url=null
+- items: lista de objetos com id, name, image_prompt (inglês), prompts (pictogram+line_art+cartoon_2d), generated, active_style="pictogram", image_url=null
 - zones: lista de objetos com id, name
 - correct_answer: {{item_name: zone_name}} ou {{"correct_zone": zone_name}} para MC
 - image_options: 2 itens com id, description, base_subject (inglês), prompts, generated, active_style, is_active, image_url
@@ -474,15 +482,15 @@ Responda SOMENTE com JSON válido:
   "image_options": [
     {{
       "id": "img_1", "description": "Ilustração principal", "base_subject": "subject in english",
-      "prompts": {{"line_art": "...", "cartoon_2d": "..."}},
-      "generated": {{"line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{"image_url": null, "generated_at": null}}}},
-      "active_style": "cartoon_2d", "is_active": true, "image_url": null
+      "prompts": {{"pictogram": "...", "line_art": "...", "cartoon_2d": "..."}},
+      "generated": {{"pictogram": {{"image_url": null, "generated_at": null}}, "line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{"image_url": null, "generated_at": null}}}},
+      "active_style": "pictogram", "is_active": true, "image_url": null
     }},
     {{
       "id": "img_2", "description": "Pictograma AAC", "base_subject": "AAC pictogram subject",
-      "prompts": {{"line_art": "...", "cartoon_2d": "..."}},
-      "generated": {{"line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{"image_url": null, "generated_at": null}}}},
-      "active_style": "cartoon_2d", "is_active": true, "image_url": null
+      "prompts": {{"pictogram": "...", "line_art": "...", "cartoon_2d": "..."}},
+      "generated": {{"pictogram": {{"image_url": null, "generated_at": null}}, "line_art": {{"image_url": null, "generated_at": null}}, "cartoon_2d": {{"image_url": null, "generated_at": null}}}},
+      "active_style": "pictogram", "is_active": true, "image_url": null
     }}
   ],
   "audio_options": [{{
@@ -501,9 +509,9 @@ Responda SOMENTE com JSON válido:
     "items": [
       {{
         "name": "item1", "image_prompt": "item1 cartoon",
-        "prompts": {{"line_art": "...", "cartoon_2d": "..."}},
-        "generated": {{"line_art": {{"image_url": null}}, "cartoon_2d": {{"image_url": null}}}},
-        "active_style": "cartoon_2d", "image_url": null
+        "prompts": {{"pictogram": "...", "line_art": "...", "cartoon_2d": "..."}},
+        "generated": {{"pictogram": {{"image_url": null}}, "line_art": {{"image_url": null}}, "cartoon_2d": {{"image_url": null}}}},
+        "active_style": "pictogram", "image_url": null
       }}
     ],
     "zones": [{{"name": "Categoria A"}}, {{"name": "Categoria B"}}],

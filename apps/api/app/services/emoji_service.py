@@ -146,6 +146,10 @@ CONCEPT_EMOJI: dict[str, str] = {
     "extintor": "🧯",
     "mangueira": "🚒",
     "giz": "✏️",
+    "pintura corporal": "🎨",
+    "pintura": "🎨",
+    "indígena": "🛖",
+    "indigena": "🛖",
     # ── Posição ──────────────────────────────────────────────────────────────
     "em cima": "⬆️",
     "embaixo": "⬇️",

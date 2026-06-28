@@ -13,28 +13,37 @@ interface GalleryItem {
   created_at: string;
 }
 
+type ImageStyle = "pictogram" | "line_art" | "cartoon_2d";
+
+const STYLE_LABELS: Record<ImageStyle, string> = {
+  pictogram: "Pictograma",
+  line_art: "Desenho P&B",
+  cartoon_2d: "Cartoon",
+};
+
 interface Props {
   open: boolean;
   onClose: () => void;
-  onSelect: (imageUrl: string, galleryImageId: string) => void;
+  onSelect: (imageUrl: string, galleryImageId: string, style: ImageStyle | null) => void;
   currentImageUrl?: string | null;
+  initialStyle?: ImageStyle;
 }
 
-export default function ImagePickerModal({ open, onClose, onSelect, currentImageUrl }: Props) {
+export default function ImagePickerModal({ open, onClose, onSelect, currentImageUrl, initialStyle = "pictogram" }: Props) {
   const [images, setImages] = useState<GalleryItem[]>([]);
   const [search, setSearch] = useState("");
-  const [styleFilter, setStyleFilter] = useState<"" | "line_art" | "cartoon_2d">("");
+  const [styleFilter, setStyleFilter] = useState<"" | ImageStyle>(initialStyle);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       setSearch("");
-      setStyleFilter("");
+      setStyleFilter(initialStyle);
       setSelectedId(null);
       load();
     }
-  }, [open]);
+  }, [open, initialStyle]);
 
   async function load() {
     setLoading(true);
@@ -57,7 +66,7 @@ export default function ImagePickerModal({ open, onClose, onSelect, currentImage
 
   function handleSelect(img: GalleryItem) {
     setSelectedId(img.id);
-    onSelect(img.image_url, img.id);
+    onSelect(img.image_url, img.id, img.style as ImageStyle | null);
     onClose();
   }
 
@@ -95,10 +104,11 @@ export default function ImagePickerModal({ open, onClose, onSelect, currentImage
           </div>
           <select
             value={styleFilter}
-            onChange={(e) => setStyleFilter(e.target.value as "" | "line_art" | "cartoon_2d")}
+            onChange={(e) => setStyleFilter(e.target.value as "" | ImageStyle)}
             className="text-sm border border-gray-200 rounded-lg px-2 py-1.5"
           >
             <option value="">Todos os estilos</option>
+            <option value="pictogram">Pictogramas</option>
             <option value="cartoon_2d">Cartoon colorido</option>
             <option value="line_art">Desenho P&B</option>
           </select>
@@ -154,7 +164,7 @@ export default function ImagePickerModal({ open, onClose, onSelect, currentImage
                       </p>
                       {img.style && (
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {img.style === "cartoon_2d" ? "Cartoon" : "P&B"}
+                          {STYLE_LABELS[img.style as ImageStyle] ?? img.style}
                         </p>
                       )}
                       {img.source === "uploaded" && (
