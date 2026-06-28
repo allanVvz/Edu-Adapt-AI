@@ -1,14 +1,19 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
 from ..models.activity import Activity
 from ..models.student import Student
+from ..models.student_profile import StudentProfile
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
+from ..services.static_url_service import normalized_output_data
+from ..services.pdf_service import AdaptationPDFRenderer
+from ..services.pdf_constants import get_profile_config
 import uuid
 
 router = APIRouter(prefix="/student", tags=["student"])
@@ -28,6 +33,8 @@ def _get_student(session: Session, user_id: str) -> Student:
 
 def _can_access(adaptation: ActivityAdaptation, student: Student) -> bool:
     """True if student's profile matches the adaptation's profile."""
+    if adaptation.student_id == student.id:
+        return True
     if student.profile_id and adaptation.student_profile_id == student.profile_id:
         return True
     return False
@@ -37,7 +44,7 @@ def _get_item_label(item: object) -> str:
     if isinstance(item, str):
         return item
     if isinstance(item, dict):
-        return item.get("name", str(item))
+        return item.get("name") or item.get("description") or str(item)
     return str(item)
 
 
@@ -93,6 +100,17 @@ def list_student_activities(
             )
         ).all()
 
+    direct_adaptations = session.exec(
+        select(ActivityAdaptation).where(
+            ActivityAdaptation.student_id == student.id,
+            ActivityAdaptation.status == "published",
+        )
+    ).all()
+    by_id = {a.id: a for a in adaptations}
+    for a in direct_adaptations:
+        by_id[a.id] = a
+    adaptations = sorted(by_id.values(), key=lambda a: a.created_at, reverse=True)
+
     result = []
     for a in adaptations:
         activity = session.get(Activity, a.activity_id)
@@ -109,6 +127,7 @@ def list_student_activities(
 @router.get("/activities/{adaptation_id}")
 def get_student_activity(
     adaptation_id: str,
+    request: Request,
     current_user=Depends(get_session_user),
     session: Session = Depends(get_session),
 ):
@@ -125,7 +144,7 @@ def get_student_activity(
         "id": adaptation.id,
         "activity_id": adaptation.activity_id,
         "title": activity.title if activity else None,
-        "output": adaptation.output_data,
+        "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
     }
 
 
@@ -207,3 +226,45 @@ def submit_activity(
 
     session.commit()
     return {"score": score, "max_score": max_score, "percentage": round((score / max_score) * 100)}
+
+
+@router.get("/activities/{adaptation_id}/pdf")
+def download_student_activity_pdf(
+    adaptation_id: str,
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    """Generate and download the PDF version of a published activity the student has access to."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation or adaptation.status != "published" or not _can_access(adaptation, student):
+        raise HTTPException(status_code=404, detail="Activity not found or not published")
+    if not adaptation.output_data:
+        raise HTTPException(status_code=422, detail="Activity has no generated content yet")
+
+    activity = session.get(Activity, adaptation.activity_id)
+    title = activity.title if activity else "Atividade"
+    discipline = activity.discipline if activity else None
+
+    profile_name: Optional[str] = None
+    if adaptation.student_profile_id:
+        profile = session.get(StudentProfile, adaptation.student_profile_id)
+        profile_name = profile.name if profile else None
+
+    cfg = get_profile_config(profile_name)
+    pdf_bytes = AdaptationPDFRenderer(
+        output_data=adaptation.output_data,
+        activity_title=title,
+        config=cfg,
+        discipline=discipline,
+    ).render()
+
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
+    )

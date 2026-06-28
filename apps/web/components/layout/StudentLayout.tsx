@@ -1,10 +1,20 @@
 "use client";
+import { useEffect, useState } from "react";
 import { BookOpen } from "lucide-react";
-import { getUser } from "@/lib/auth";
+import { AuthUser, getUser } from "@/lib/auth";
 import UserDropdown from "./UserDropdown";
 
-export default function StudentLayout({ children }: { children: React.ReactNode }) {
-  const user = getUser();
+interface StudentLayoutProps {
+  children: React.ReactNode;
+  headerAction?: React.ReactNode;
+}
+
+export default function StudentLayout({ children, headerAction }: StudentLayoutProps) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    setUser(getUser());
+  }, []);
 
   return (
     <div className="min-h-screen bg-blue-50">
@@ -14,7 +24,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
             <BookOpen size={20} />
             <span>Minhas Atividades</span>
           </div>
-          {user && <UserDropdown user={user} />}
+          <div className="flex items-center gap-3">
+            {headerAction}
+            {user && <UserDropdown user={user} />}
+          </div>
         </div>
       </header>
 
