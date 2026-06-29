@@ -56,11 +56,11 @@ export default function StudentPage() {
   const exportButton = (
     <button
       onClick={handleExportAllPDF}
-      disabled={exporting || loading || activities.length === 0}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      disabled={exporting || loading}
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-300 bg-white text-blue-700 text-sm font-medium hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     >
       <Download size={14} />
-      {exporting ? "Gerando..." : "Apostila"}
+      {exporting ? "Gerando..." : "Exportar Apostila"}
     </button>
   );
 
