@@ -96,6 +96,7 @@ def _build_output_data(versao: dict, version_key: str) -> dict:
     fmt = versao.get("fmt", "mc")
     enun = versao.get("enun", "Observe e responda.")
     dados = versao.get("dados", {})
+    contexto = versao.get("contexto", "")
     apoios = versao.get("apoios", [])
     audio_cfg = VERSION_AUDIO_CONFIG[version_key]
 
@@ -185,16 +186,23 @@ def _build_output_data(versao: dict, version_key: str) -> dict:
             img["illustration_type"] = "emoji"
             img["emoji"] = emoji
 
-    script = _build_narration(enun, dados, fmt, version_key)
-    tts_script = re.sub(r'\[(?:pausa|repete|aguarda toque)\]', ' ', script, flags=re.IGNORECASE)
+    narration = _build_narration(enun, dados, fmt, version_key)
+    if contexto:
+        full_script = f"{contexto} {narration}"
+        display_text = f"{contexto}\n\n{enun}"
+    else:
+        full_script = narration
+        display_text = enun
+
+    tts_script = re.sub(r'\[(?:pausa|repete|aguarda toque)\]', ' ', full_script, flags=re.IGNORECASE)
     tts_script = re.sub(r' {2,}', ' ', tts_script).strip()
 
     return {
-        "text_adaptations": [{"version": 1, "content": enun}],
+        "text_adaptations": [{"version": 1, "content": display_text}],
         "image_options": image_options,
         "audio_options": [{
             "id": "audio_1",
-            "script": script,
+            "script": full_script,
             "tts_script": tts_script,
             "voice_style": audio_cfg["pitch"],
             "voice": audio_cfg["voice"],
@@ -689,6 +697,7 @@ APOSTILA_ACTIVITIES = [
             },
             "p3": {
                 "fmt": "toque",
+                "contexto": "Carlos escreveu uma carta para a sua avó Ana. Ele colocou a carta no correio. A avó recebeu a carta em casa.",
                 "enun": "Carlos ESCREVEU a carta ou a RECEBEU? Toque.",
                 "dados": {
                     "items": ["Minha resposta"],
@@ -697,7 +706,6 @@ APOSTILA_ACTIVITIES = [
                     "instructions": "Toque.",
                 },
                 "apoios": ["carta"],
-                "roteiro": "Voz muito lenta. Carlos… ESCREVEU… [aguarda toque]",
             },
         },
     },

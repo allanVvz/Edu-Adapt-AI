@@ -47,12 +47,59 @@ FMT_TO_INTERACTION_TYPE = {
 }
 
 
+def _build_narration(enun: str, dados: dict, fmt: str, version_key: str) -> str:
+    """Generate natural TTS narration from structured activity data."""
+    def _name(z):
+        if isinstance(z, str): return z
+        if isinstance(z, dict): return z.get("name", "")
+        return str(z)
+
+    zone_names = [_name(z) for z in dados.get("zones", [])]
+    item_names = [_name(i) for i in dados.get("items", []) if _name(i) != "Minha resposta"]
+
+    if fmt in ("mc", "toque"):
+        opts = zone_names
+        if version_key == "p3":
+            opts_simple = " ou ".join(opts[:2]) if len(opts) >= 2 else (opts[0] if opts else "")
+            return f"{enun} {opts_simple}. [aguarda toque]"
+        elif version_key == "p2":
+            return enun + "".join(f" [pausa] {o}." for o in opts)
+        elif version_key == "p1":
+            return f"{enun} Escolha: {'. '.join(opts)}."
+        else:
+            return f"{enun} As opções são: {'. '.join(opts)}."
+
+    elif fmt in ("dnd", "par"):
+        all_items = item_names if item_names else zone_names
+        if version_key == "p3":
+            return f"{enun} [aguarda toque]"
+        elif version_key == "p2":
+            return enun + "".join(f" [pausa] {i}." for i in all_items)
+        elif version_key == "p1":
+            return f"{enun} Os itens são: {'. '.join(all_items)}."
+        else:
+            return f"{enun} Organize os itens: {'. '.join(all_items)}."
+
+    elif fmt == "seq":
+        if version_key == "p3":
+            return f"{enun} [aguarda toque]"
+        elif version_key == "p2":
+            return enun + "".join(f" [pausa] {i}." for i in item_names)
+        elif version_key == "p1":
+            return f"{enun} Coloque em ordem: {'. '.join(item_names)}."
+        else:
+            return f"{enun} Numere em ordem: {'. '.join(item_names)}."
+
+    else:  # diss
+        return enun
+
+
 def _build_output_data(versao: dict, version_key: str) -> dict:
     """Convert a version dict from the TEA activity spec to output_data format."""
     fmt = versao.get("fmt", "mc")
     enun = versao.get("enun", "Observe e responda.")
     dados = versao.get("dados", {})
-    roteiro = versao.get("roteiro", enun)
+    contexto = versao.get("contexto", "")
     apoios = versao.get("apoios", [])
     audio_cfg = VERSION_AUDIO_CONFIG[version_key]
 
@@ -151,16 +198,23 @@ def _build_output_data(versao: dict, version_key: str) -> dict:
             img["illustration_type"] = "emoji"
             img["emoji"] = emoji
 
-    tts_script = roteiro
-    tts_script = re.sub(r'\[(?:pausa|repete|aguarda toque)\]', ' ', tts_script, flags=re.IGNORECASE)
+    narration = _build_narration(enun, dados, fmt, version_key)
+    if contexto:
+        full_script = f"{contexto} {narration}"
+        display_text = f"{contexto}\n\n{enun}"
+    else:
+        full_script = narration
+        display_text = enun
+
+    tts_script = re.sub(r'\[(?:pausa|repete|aguarda toque)\]', ' ', full_script, flags=re.IGNORECASE)
     tts_script = re.sub(r' {2,}', ' ', tts_script).strip()
 
     return {
-        "text_adaptations": [{"version": 1, "content": enun}],
+        "text_adaptations": [{"version": 1, "content": display_text}],
         "image_options": image_options,
         "audio_options": [{
             "id": "audio_1",
-            "script": roteiro,
+            "script": full_script,
             "tts_script": tts_script,
             "voice_style": audio_cfg["pitch"],
             "voice": audio_cfg["voice"],
