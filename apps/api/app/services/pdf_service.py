@@ -65,7 +65,7 @@ class AdaptationPDFRenderer:
     # ─── Public ───────────────────────────────────────────────────────────────
 
     def build_story(self) -> list[Any]:
-        """Return the list of ReportLab flowables for this adaptation (no document wrapper)."""
+        """Return flowables including teacher script (for admin/review PDF)."""
         story: list[Any] = []
         story.extend(self._draw_header())
         story.extend(self._draw_text_adaptations())
@@ -73,6 +73,16 @@ class AdaptationPDFRenderer:
         story.extend(self._draw_images())
         story.extend(self._draw_interaction())
         story.extend(self._draw_teacher_script())
+        return story
+
+    def build_student_story(self) -> list[Any]:
+        """Return flowables for student apostila — no teacher script, print-ready."""
+        story: list[Any] = []
+        story.extend(self._draw_header())
+        story.extend(self._draw_text_adaptations())
+        story.extend(self._draw_instructions())
+        story.extend(self._draw_images_inline())
+        story.extend(self._draw_interaction())
         return story
 
     def render(self) -> bytes:
@@ -309,6 +319,69 @@ class AdaptationPDFRenderer:
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
+    def _draw_images_inline(self) -> list:
+        """Images and text side-by-side — for print apostila layout."""
+        slots = [s for s in self._data.get("image_options", []) if s.get("is_active", True)]
+        if not slots:
+            return []
+
+        elements: list[Any] = []
+        cfg = self._cfg
+
+        for slot in slots[:2]:
+            description = slot.get("description", "")
+            illustration_type = slot.get("illustration_type", "generated")
+            emoji = slot.get("emoji", "")
+            image_url = slot.get("image_url")
+
+            img_element: Any = None
+            if illustration_type == "emoji" and emoji:
+                img_element = Paragraph(
+                    f'<font size="{int(cfg.image_max_size * 0.55)}">{emoji}</font>',
+                    ParagraphStyle("emoji_inline", alignment=1, leading=cfg.image_max_size * 0.65),
+                )
+            elif image_url:
+                local = self._url_to_local(image_url)
+                if local and os.path.isfile(local):
+                    try:
+                        s = int(cfg.image_max_size * 0.8)
+                        img_element = Image(local, width=s, height=s)
+                    except Exception:
+                        pass
+
+            if img_element is None:
+                box_size = int(cfg.image_max_size * 0.8)
+                img_element = Table(
+                    [[Paragraph("", self._styles["placeholder"])]],
+                    colWidths=[box_size], rowHeights=[box_size],
+                    style=TableStyle([
+                        ("BOX", (0, 0), (-1, -1), 1.5, colors.HexColor("#CCCCCC")),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F5F5F5")),
+                    ]),
+                )
+
+            img_col_w = cfg.image_max_size + 10
+            text_col_w = A4_USABLE_WIDTH - img_col_w - 8
+            caption = Paragraph(description.capitalize(), self._styles["img_caption"])
+            row = Table(
+                [[img_element, caption]],
+                colWidths=[img_col_w, text_col_w],
+                style=TableStyle([
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]),
+            )
+            elements.append(row)
+            elements.append(Spacer(1, 6))
+
+        elements.append(Spacer(1, 10))
+        return elements
+
     def _make_image_cell(self, slot: dict) -> Any:
         """Return a nested Table suitable for a single image-grid cell."""
         description = slot.get("description", "")
@@ -359,7 +432,7 @@ class AdaptationPDFRenderer:
 
 
 def build_combined_pdf(renderers: list["AdaptationPDFRenderer"]) -> bytes:
-    """Merge multiple renderers into a single multi-page PDF, one activity per page."""
+    """Merge multiple renderers into a single print-ready apostila PDF."""
     if not renderers:
         return b""
     buf = io.BytesIO()
@@ -370,14 +443,14 @@ def build_combined_pdf(renderers: list["AdaptationPDFRenderer"]) -> bytes:
         rightMargin=PAGE_MARGIN_PT,
         topMargin=PAGE_MARGIN_PT,
         bottomMargin=PAGE_MARGIN_PT,
-        title="Atividades do Aluno",
+        title="Apostila de Atividades",
         author="EduAdapt AI",
     )
     full_story: list[Any] = []
     for i, renderer in enumerate(renderers):
         if i > 0:
             full_story.append(PageBreak())
-        full_story.extend(renderer.build_story())
+        full_story.extend(renderer.build_student_story())
     doc.build(full_story)
     return buf.getvalue()
 

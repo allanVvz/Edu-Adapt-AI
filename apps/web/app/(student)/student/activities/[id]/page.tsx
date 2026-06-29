@@ -580,7 +580,7 @@ export default function StudentActivityPage() {
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 flex items-start gap-3">
               <Volume2 size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <p className="text-xs text-blue-500 font-medium mb-1">Áudio — {audio.voice_style}</p>
+                <p className="text-xs text-blue-500 font-medium mb-1">Narração — {audio.voice_style}</p>
                 {audio.audio_url && (
                   <div className="space-y-2 mb-3">
                     <button
