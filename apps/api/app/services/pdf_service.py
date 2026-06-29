@@ -320,106 +320,85 @@ class AdaptationPDFRenderer:
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
     def _draw_images_inline(self) -> list:
-        """Images and text side-by-side — for print apostila layout."""
+        """Images side-by-side with caption — for student apostila layout."""
         slots = [s for s in self._data.get("image_options", []) if s.get("is_active", True)]
         if not slots:
             return []
 
         elements: list[Any] = []
-        cfg = self._cfg
+        col_w = A4_USABLE_WIDTH / 2 - 8
 
-        for slot in slots[:2]:
-            description = slot.get("description", "")
-            illustration_type = slot.get("illustration_type", "generated")
-            emoji = slot.get("emoji", "")
-            image_url = slot.get("image_url")
+        pair = slots[:2]
+        row_cells = []
+        for slot in pair:
+            box = self._make_image_cell(slot)
+            row_cells.append(box)
+        if len(row_cells) == 1:
+            row_cells.append(Paragraph("", self._styles["body"]))
 
-            img_element: Any = None
-            if illustration_type == "emoji" and emoji:
-                img_element = Paragraph(
-                    f'<font size="{int(cfg.image_max_size * 0.55)}">{emoji}</font>',
-                    ParagraphStyle("emoji_inline", alignment=1, leading=cfg.image_max_size * 0.65),
-                )
-            elif image_url:
-                local = self._url_to_local(image_url)
-                if local and os.path.isfile(local):
-                    try:
-                        s = int(cfg.image_max_size * 0.8)
-                        img_element = Image(local, width=s, height=s)
-                    except Exception:
-                        pass
-
-            if img_element is None:
-                box_size = int(cfg.image_max_size * 0.8)
-                img_element = Table(
-                    [[Paragraph("", self._styles["placeholder"])]],
-                    colWidths=[box_size], rowHeights=[box_size],
-                    style=TableStyle([
-                        ("BOX", (0, 0), (-1, -1), 1.5, colors.HexColor("#CCCCCC")),
-                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F5F5F5")),
-                    ]),
-                )
-
-            img_col_w = cfg.image_max_size + 10
-            text_col_w = A4_USABLE_WIDTH - img_col_w - 8
-            caption = Paragraph(description.capitalize(), self._styles["img_caption"])
-            row = Table(
-                [[img_element, caption]],
-                colWidths=[img_col_w, text_col_w],
-                style=TableStyle([
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ]),
-            )
-            elements.append(row)
-            elements.append(Spacer(1, 6))
-
+        img_table = Table(
+            [row_cells],
+            colWidths=[col_w, col_w],
+            style=TableStyle([
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]),
+        )
+        elements.append(img_table)
         elements.append(Spacer(1, 10))
         return elements
 
     def _make_image_cell(self, slot: dict) -> Any:
-        """Return a nested Table suitable for a single image-grid cell."""
+        """Render one image slot: real image if available, else concept label box."""
         description = slot.get("description", "")
         image_url = slot.get("image_url")
-        illustration_type = slot.get("illustration_type")
+        illustration_type = slot.get("illustration_type", "generated")
+        col_w = A4_USABLE_WIDTH / 2 - 16
+        box_size = self._cfg.image_max_size
 
-        # Prefer real image file
+        # Real generated image file
         if image_url and illustration_type != "emoji":
             local = self._url_to_local(image_url)
             if local and os.path.isfile(local):
                 try:
-                    size = self._cfg.image_max_size
-                    cell_rows = [
-                        [Image(local, width=size, height=size)],
-                        [Paragraph(description, self._styles["img_caption"])],
-                    ]
-                    return Table(cell_rows, colWidths=[A4_USABLE_WIDTH / 2 - 16])
+                    img = Image(local, width=box_size, height=box_size)
+                    return Table(
+                        [[img], [Paragraph(description, self._styles["img_caption"])]],
+                        colWidths=[col_w],
+                    )
                 except Exception:
-                    pass  # fall through to placeholder
+                    pass
 
-        # Empty picture-frame placeholder; description appears only as caption below
-        box_style = TableStyle([
-            ("BOX", (0, 0), (-1, -1), 1.5, colors.HexColor("#CCCCCC")),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F0F0F0")),
-        ])
-        box_size = self._cfg.image_max_size
-        placeholder = Table(
-            [[Paragraph("", self._styles["placeholder"])]],
+        # Concept label box — works for emoji slots and missing images
+        concept = Table(
+            [[Paragraph(description.upper(), self._styles["concept_label"])]],
             colWidths=[box_size],
             rowHeights=[box_size],
-            style=box_style,
+            style=TableStyle([
+                ("BOX", (0, 0), (-1, -1), 2.5, self._cfg.primary_color),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 0), (-1, -1), self._concept_bg()),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]),
         )
         return Table(
-            [[placeholder], [Paragraph(description, self._styles["img_caption"])]],
-            colWidths=[A4_USABLE_WIDTH / 2 - 16],
+            [[concept], [Paragraph(description, self._styles["img_caption"])]],
+            colWidths=[col_w],
         )
+
+    def _concept_bg(self) -> colors.Color:
+        """Light tint (15% primary + 85% white) for concept label box background."""
+        ph = self._cfg.primary_hex.lstrip("#")
+        r, g, b = int(ph[0:2], 16), int(ph[2:4], 16), int(ph[4:6], 16)
+        return colors.Color((r * 0.12 + 255 * 0.88) / 255,
+                            (g * 0.12 + 255 * 0.88) / 255,
+                            (b * 0.12 + 255 * 0.88) / 255)
 
     def _url_to_local(self, url: str) -> Optional[str]:
         """Map a /static/images/... URL to an absolute path in the container."""
@@ -545,6 +524,15 @@ def _build_styles(cfg: PDFConfig) -> dict[str, ParagraphStyle]:
             textColor=cfg.muted_color,
             alignment=1,
             spaceAfter=4,
+        ),
+        "concept_label": make(
+            "concept_label",
+            fontName=FONT_BOLD,
+            fontSize=min(fs_b + 4, 22),
+            textColor=pc,
+            alignment=1,
+            leading=min(fs_b + 4, 22) * 1.3,
+            wordWrap="LTR",
         ),
         "placeholder": make(
             "placeholder",

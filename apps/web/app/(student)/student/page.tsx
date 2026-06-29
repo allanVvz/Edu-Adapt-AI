@@ -56,11 +56,11 @@ export default function StudentPage() {
   const exportButton = (
     <button
       onClick={handleExportAllPDF}
-      disabled={exporting || activities.length === 0}
+      disabled={exporting || loading || activities.length === 0}
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     >
       <Download size={14} />
-      {exporting ? "Gerando..." : "Exportar PDF"}
+      {exporting ? "Gerando..." : "Apostila"}
     </button>
   );
 
@@ -103,6 +103,15 @@ export default function StudentPage() {
               </div>
             </button>
           ))}
+
+          <button
+            onClick={handleExportAllPDF}
+            disabled={exporting}
+            className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-4 rounded-2xl border-2 border-blue-300 border-dashed text-blue-700 font-semibold hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Download size={18} />
+            {exporting ? "Gerando apostila..." : `Exportar apostila completa (${activities.length} atividades)`}
+          </button>
         </div>
       )}
     </StudentLayout>
