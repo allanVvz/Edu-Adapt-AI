@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import StudentLayout from "@/components/layout/StudentLayout";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { CheckCircle, Volume2, RotateCcw, FileDown, Loader2 } from "lucide-react";
+import { CheckCircle, Volume2, RotateCcw, FileDown, Loader2, BookOpen } from "lucide-react";
 import clsx from "clsx";
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -46,8 +46,16 @@ interface ImageOption {
 
 interface OutputData {
   text_adaptations?: Array<{ version: number; content: string }>;
-  audio_options?: Array<{ id?: string; script: string; voice_style: string; audio_url?: string | null }>;
+  audio_options?: Array<{ id?: string; script: string; tts_script?: string; voice_style: string; audio_url?: string | null; rhythm?: number }>;
   interaction_options?: InteractionOption[];
+  image_options?: ImageOption[];
+}
+
+interface StoryData {
+  id: string;
+  title: string;
+  content: string;
+  audio_options?: Array<{ id?: string; script: string; tts_script?: string; voice_style?: string; audio_url?: string | null; rhythm?: number }>;
   image_options?: ImageOption[];
 }
 
@@ -389,6 +397,7 @@ export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [title, setTitle] = useState<string | null>(null);
+  const [story, setStory] = useState<StoryData | null>(null);
   const [output, setOutput] = useState<OutputData | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, "correct" | "incorrect">>({});
@@ -397,6 +406,33 @@ export default function StudentActivityPage() {
   const [startTime] = useState<number>(Date.now());
   const [exporting, setExporting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const storyAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  function playNarration(
+    option: { script?: string; tts_script?: string; audio_url?: string | null; rhythm?: number },
+    audioElement: HTMLAudioElement | null,
+  ) {
+    if (option.audio_url && audioElement) {
+      audioElement.play().catch(() => toast.error("Não foi possível iniciar o áudio."));
+      return;
+    }
+
+    const textToSpeak = (option.tts_script || option.script || "").trim();
+    if (!textToSpeak) {
+      toast.error("Não há roteiro de áudio para reproduzir.");
+      return;
+    }
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("Este navegador não suporta leitura em voz alta.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.lang = "pt-BR";
+    utterance.rate = Math.max(0.5, Math.min(1.2, option.rhythm ?? 0.9));
+    window.speechSynthesis.speak(utterance);
+  }
 
   async function handleExportPDF() {
     setExporting(true);
@@ -424,6 +460,7 @@ export default function StudentActivityPage() {
     api.get(`/student/activities/${id}`)
       .then(async (r) => {
         setTitle(r.data.title ?? null);
+        setStory(r.data.story ?? null);
         setOutput(r.data.output);
         await api.post(`/student/activities/${id}/start`).catch(() => {});
       })
@@ -504,6 +541,8 @@ export default function StudentActivityPage() {
   const audio = output.audio_options?.[0];
   const interaction = output.interaction_options?.[0];
   const visualImages = (output.image_options ?? []).filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
+  const storyImages = (story?.image_options ?? []).filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
+  const storyAudio = story?.audio_options?.[0];
 
   const allAnswered = interaction
     ? interaction.items.every((item) => answers[getLabel(item)])
@@ -511,6 +550,64 @@ export default function StudentActivityPage() {
 
   return (
     <StudentLayout headerAction={exportButton}>
+      {story && (
+        <section className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden mb-5">
+          <div className="bg-amber-50 border-b border-amber-100 px-5 py-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <BookOpen size={20} className="text-amber-600 flex-shrink-0" />
+              <h2 className="font-bold text-gray-900">{story.title}</h2>
+            </div>
+          </div>
+          <div className="p-5">
+            {storyImages.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {storyImages.map((img) => (
+                  <div key={img.id} className="rounded-xl border border-amber-100 bg-amber-50 text-center overflow-hidden">
+                    {img.image_url ? (
+                      <img src={img.image_url} alt={img.description} className="w-full h-28 object-cover" />
+                    ) : (
+                      <div className="h-28 flex items-center justify-center text-5xl">{img.emoji || img.symbol}</div>
+                    )}
+                    <p className="text-xs text-gray-600 px-2 py-2">{img.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/30 p-4 mb-4">
+              <pre className="text-base text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">{story.content}</pre>
+            </div>
+
+            {storyAudio && (
+              <div className="rounded-xl border border-blue-100 bg-white p-4">
+                <div className="flex items-center gap-2 text-blue-600 text-sm font-semibold mb-2">
+                  <Volume2 size={16} /> Narração do conto
+                </div>
+                <div className="space-y-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => playNarration(storyAudio, storyAudioRef.current)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl"
+                  >
+                    <Volume2 size={16} /> Ouvir narração
+                  </button>
+                  {storyAudio.audio_url && (
+                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                    <audio ref={storyAudioRef} controls src={storyAudio.audio_url} className="w-full h-9 rounded-lg" />
+                  )}
+                </div>
+                {!storyAudio.audio_url && (
+                  <p className="text-xs text-blue-500 mb-3">
+                    Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
+                  </p>
+                )}
+                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{storyAudio.script}</pre>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {title && (
         <h1 className="text-lg font-bold text-gray-900 mb-4">{title}</h1>
       )}
@@ -581,20 +678,22 @@ export default function StudentActivityPage() {
               <Volume2 size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p className="text-xs text-blue-500 font-medium mb-1">Narração — {audio.voice_style}</p>
-                {audio.audio_url && (
-                  <div className="space-y-2 mb-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        audioRef.current?.play().catch(() => toast.error("Não foi possível iniciar o áudio."));
-                      }}
-                      className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl"
-                    >
-                      <Volume2 size={16} /> Ouvir narração
-                    </button>
-                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <div className="space-y-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => playNarration(audio, audioRef.current)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl"
+                  >
+                    <Volume2 size={16} /> Ouvir narração
+                  </button>
+                  {audio.audio_url && (
                     <audio ref={audioRef} controls src={audio.audio_url} className="w-full h-9 rounded-lg" />
-                  </div>
+                  )}
+                </div>
+                {!audio.audio_url && (
+                  <p className="text-xs text-blue-500 mb-3">
+                    Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
+                  </p>
                 )}
                 <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{audio.script}</pre>
               </div>

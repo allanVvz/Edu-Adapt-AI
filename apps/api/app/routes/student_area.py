@@ -7,10 +7,12 @@ from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
 from ..models.activity import Activity
+from ..models.story import Story
 from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
+from ..routes.stories import serialize_story_detail
 from ..services.static_url_service import normalized_output_data
 from ..services.pdf_service import AdaptationPDFRenderer, build_combined_pdf
 from ..services.pdf_constants import get_profile_config
@@ -46,6 +48,18 @@ def _get_item_label(item: object) -> str:
     if isinstance(item, dict):
         return item.get("name") or item.get("description") or str(item)
     return str(item)
+
+
+def _story_pdf_data(story: Story | None) -> dict | None:
+    if not story:
+        return None
+    return {
+        "id": story.id,
+        "title": story.title,
+        "content": story.content,
+        "image_options": story.image_options or [],
+        "audio_options": story.audio_options or [],
+    }
 
 
 def _calculate_score(adaptation_output: dict, response: dict) -> tuple[float, float]:
@@ -166,11 +180,13 @@ def export_all_activities_pdf(
         activity = session.get(Activity, adaptation.activity_id)
         title = activity.title if activity else "Atividade"
         discipline = activity.discipline if activity else None
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
         renderers.append(AdaptationPDFRenderer(
             output_data=adaptation.output_data,
             activity_title=title,
             config=cfg,
             discipline=discipline,
+            story_data=_story_pdf_data(story),
         ))
 
     if not renderers:
@@ -200,10 +216,12 @@ def get_student_activity(
         raise HTTPException(status_code=404, detail="Activity not found or not published")
 
     activity = session.get(Activity, adaptation.activity_id)
+    story = session.get(Story, activity.story_id) if activity and activity.story_id else None
     return {
         "id": adaptation.id,
         "activity_id": adaptation.activity_id,
         "title": activity.title if activity else None,
+        "story": serialize_story_detail(story, str(request.base_url).rstrip("/")),
         "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
     }
 
@@ -308,6 +326,7 @@ def download_student_activity_pdf(
     activity = session.get(Activity, adaptation.activity_id)
     title = activity.title if activity else "Atividade"
     discipline = activity.discipline if activity else None
+    story = session.get(Story, activity.story_id) if activity and activity.story_id else None
 
     profile_name: Optional[str] = None
     if adaptation.student_profile_id:
@@ -320,6 +339,7 @@ def download_student_activity_pdf(
         activity_title=title,
         config=cfg,
         discipline=discipline,
+        story_data=_story_pdf_data(story),
     ).render()
 
     safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]

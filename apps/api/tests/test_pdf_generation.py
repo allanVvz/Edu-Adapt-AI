@@ -14,7 +14,11 @@ from app.services.pdf_constants import (
     PROFILE_CONFIGS,
     get_profile_config,
 )
-from app.services.pdf_service import AdaptationPDFRenderer
+from app.services.pdf_service import (
+    AdaptationPDFRenderer,
+    _group_renderers_by_story,
+    build_combined_pdf,
+)
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -138,6 +142,43 @@ def _render(output_data: dict, profile_name: str | None = None) -> bytes:
     ).render()
 
 
+def _story_data(story_id: str = "story-ravi-nina") -> dict:
+    return {
+        "id": story_id,
+        "title": "O Coelho e a Chuva",
+        "content": "Ravi encontrou Nina embaixo da arvore durante a chuva.",
+        "image_options": [
+            {"id": "story-img-1", "description": "coelho", "emoji": "🐰", "is_active": True},
+            {"id": "story-img-2", "description": "chuva", "emoji": "🌧️", "is_active": True},
+        ],
+        "audio_options": [],
+    }
+
+
+def _renderer(title: str, story: dict | None = None) -> AdaptationPDFRenderer:
+    return AdaptationPDFRenderer(
+        output_data=FULL_OUTPUT_MC,
+        activity_title=title,
+        config=get_profile_config(None),
+        discipline="Português",
+        story_data=story,
+    )
+
+
+def _flowable_texts(flowables) -> list[str]:
+    texts: list[str] = []
+    for flowable in flowables:
+        if hasattr(flowable, "getPlainText"):
+            texts.append(flowable.getPlainText())
+        cells = getattr(flowable, "_cellvalues", None)
+        if cells:
+            nested = []
+            for row in cells:
+                nested.extend(row if isinstance(row, list) else [row])
+            texts.extend(_flowable_texts(nested))
+    return [text for text in texts if text]
+
+
 # ─── Profile config tests ─────────────────────────────────────────────────────
 
 class TestGetProfileConfig:
@@ -211,6 +252,38 @@ class TestPDFOutput:
         # Both valid; não verbal tends to be larger
         assert pdf_nv[:5] == PDF_MAGIC
         assert pdf_padrao[:5] == PDF_MAGIC
+
+
+    def test_individual_pdf_includes_linked_story_before_activity(self):
+        renderer = _renderer("Atividade sobre Ravi e Nina", _story_data())
+        texts = _flowable_texts(renderer.build_student_story())
+
+        assert texts.index("BLOCO DE CONTO") < texts.index("Atividade sobre Ravi e Nina")
+        assert texts.index("O Coelho e a Chuva") < texts.index("Atividade sobre Ravi e Nina")
+
+        pdf = renderer.render()
+        assert pdf[:5] == PDF_MAGIC
+
+    def test_combined_pdf_groups_activities_by_same_story(self):
+        story = _story_data("story-1")
+        first = _renderer("Atividade 1", story)
+        unlinked = _renderer("Atividade sem conto")
+        second = _renderer("Atividade 2", story)
+        other = _renderer("Atividade outro conto", _story_data("story-2"))
+        another_unlinked = _renderer("Outra atividade sem conto")
+
+        groups = _group_renderers_by_story([first, unlinked, second, other, another_unlinked])
+
+        assert [key for key, _group in groups] == ["story-1", "story-2", None]
+        assert groups[0][1] == [first, second]
+        assert groups[1][1] == [other]
+        assert groups[2][1] == [unlinked, another_unlinked]
+
+        unlinked_texts = _flowable_texts(groups[2][1][0].build_unlinked_group_section())
+        assert "ATIVIDADES SEM CONTO" in unlinked_texts
+
+        pdf = build_combined_pdf([first, unlinked, second, other, another_unlinked])
+        assert pdf[:5] == PDF_MAGIC
 
 
 class TestPDFRobustness:

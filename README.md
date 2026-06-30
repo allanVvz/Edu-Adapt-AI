@@ -90,6 +90,26 @@ Cada uma das 25 atividades TEA tem 4 versões: padrão · p1 (Apoio Visual) · p
 
 ---
 
+## Contos e textos de apoio
+
+Atividades podem ser vinculadas a um conto ou texto de apoio reutilizavel. Uma atividade possui no maximo um conto; um conto pode atender varias atividades.
+
+Na area do aluno, o conto aparece embutido antes da atividade, sempre visivel. O mesmo objeto de conto carrega texto, pictogramas/imagens de apoio e audio.
+
+No PDF individual, o conto e anexado antes da atividade vinculada. No export geral, as atividades sao agrupadas por conto: primeiro vem o bloco do conto, depois as atividades associadas. Atividades sem conto ficam separadas em `ATIVIDADES SEM CONTO`.
+
+Contos/textos seedados atualmente:
+
+| Conto/texto | Atividades vinculadas |
+|------------|------------------------|
+| O Coelho e a Chuva | Personagens do conto; Sequencia de acontecimentos |
+| A manha da Ana | Ordenar a historia da Ana |
+| A horta da escola | Interpretar um texto curto |
+| Carta de Carlos para Ana | Carta pessoal: remetente e destinatario |
+| A anedota do detetive | Anedota: texto curto com humor |
+
+---
+
 ## Rotas da API
 
 ### Auth
@@ -105,6 +125,15 @@ POST /activities                Criar atividade
 GET  /activities/{id}           Detalhes
 PUT  /activities/{id}           Editar
 POST /activities/{id}/adapt     Gerar adaptação (IA ou mock)
+```
+
+### Contos e textos de apoio
+```
+GET  /stories                         Listar contos/textos
+POST /stories                         Criar conto/texto
+GET  /stories/{id}                    Detalhes
+PUT  /stories/{id}                    Editar
+POST /stories/{id}/generate-audio     Gerar MP3 do conto/texto
 ```
 
 ### Adaptações
@@ -135,6 +164,8 @@ GET/PUT  /students/{id}
 ```
 GET  /student/activities                            Atividades publicadas (por perfil)
 GET  /student/activities/{id}                       Acessar atividade
+GET  /student/activities/{id}/pdf                   Exportar atividade individual em PDF
+GET  /student/activities/export-all-pdf             Exportar todas as atividades em PDF
 POST /student/activities/{id}/start                 Iniciar tentativa
 POST /student/activities/{id}/submit                Submeter resposta
 ```

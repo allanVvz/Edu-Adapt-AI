@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.user import User
+from ..models.story import Story
 from ..models.activity import Activity
 from ..models.adaptation import ActivityAdaptation
 from ..models.student_profile import StudentProfile
@@ -43,6 +44,161 @@ FMT_TO_INTERACTION_TYPE = {
     "toque": "multiple_choice",
     "par":   "drag_and_drop",
 }
+
+
+RAVI_NINA_STORY_TITLE = "O Coelho e a Chuva"
+RAVI_NINA_STORY_CONTENT = """Ravi era um coelho curioso. Um dia, ele acordou e viu o céu escuro.
+De repente, começou a chover forte. Ravi correu até uma árvore para se proteger.
+Lá, ele encontrou Nina, uma tartaruga calma.
+— Não tenha medo, a chuva vai passar — disse Nina.
+Ravi respirou fundo. Os dois esperaram juntos.
+Quando a chuva parou, Ravi e Nina viraram amigos."""
+RAVI_NINA_ACTIVITY_CODES = {"AT-PORT-06", "AT-PORT-07"}
+CARTA_CARLOS_STORY_TITLE = "Carta de Carlos para Ana"
+CARTA_CARLOS_STORY_CONTENT = """São Paulo, 10 de março.
+Querida Ana,
+Estou com saudade. Plantei flores no jardim e lembrei de você.
+Com carinho,
+Carlos."""
+CARTA_CARLOS_ACTIVITY_CODES = {"AT-PORT-12"}
+ANEDOTA_DETETIVE_STORY_TITLE = "A anedota do detetive"
+ANEDOTA_DETETIVE_STORY_CONTENT = """Um detetive procurou seu guarda-chuva por toda a sala.
+Ele olhou embaixo da mesa, atrás da porta e dentro do armário.
+No fim, descobriu que estava segurando o guarda-chuva o tempo todo."""
+ANEDOTA_DETETIVE_ACTIVITY_CODES = {"AT-PORT-19"}
+
+
+def _build_ravi_nina_story_media() -> tuple[list[dict], list[dict]]:
+    image_options = [
+        {"id": "story_img_1", "description": "Ravi, coelho", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🐰"},
+        {"id": "story_img_2", "description": "Nina, tartaruga", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🐢"},
+        {"id": "story_img_3", "description": "chuva forte", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🌧️"},
+        {"id": "story_img_4", "description": "árvore", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🌳"},
+    ]
+    audio_options = [{
+        "id": "story_audio_1",
+        "script": RAVI_NINA_STORY_CONTENT,
+        "tts_script": re.sub(r" {2,}", " ", RAVI_NINA_STORY_CONTENT.replace("\n", " ")).strip(),
+        "voice_style": "calma",
+        "voice": "shimmer",
+        "rhythm": 0.85,
+        "pitch": "normal",
+        "audio_url": None,
+        "source": "seed",
+    }]
+    return image_options, audio_options
+
+
+def _seed_ravi_nina_story(session: Session, teacher: User) -> Story:
+    image_options, audio_options = _build_ravi_nina_story_media()
+    story = session.exec(
+        select(Story).where(
+            Story.teacher_id == teacher.id,
+            Story.title == RAVI_NINA_STORY_TITLE,
+        )
+    ).first()
+    if story:
+        story.content = RAVI_NINA_STORY_CONTENT
+        story.image_options = image_options
+        story.audio_options = audio_options
+        story.status = "active"
+        session.add(story)
+        session.flush()
+        return story
+
+    story = Story(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title=RAVI_NINA_STORY_TITLE,
+        content=RAVI_NINA_STORY_CONTENT,
+        image_options=image_options,
+        audio_options=audio_options,
+        status="active",
+    )
+    session.add(story)
+    session.flush()
+    return story
+
+
+def _seed_context_story(
+    session: Session,
+    teacher: User,
+    title: str,
+    content: str,
+    image_options: list[dict],
+    audio_id: str,
+) -> Story:
+    audio_options = [{
+        "id": audio_id,
+        "script": content,
+        "tts_script": re.sub(r" {2,}", " ", content.replace("\n", " ")).strip(),
+        "voice_style": "calma",
+        "voice": "shimmer",
+        "rhythm": 0.85,
+        "pitch": "normal",
+        "audio_url": None,
+        "source": "seed",
+    }]
+    story = session.exec(
+        select(Story).where(
+            Story.teacher_id == teacher.id,
+            Story.title == title,
+        )
+    ).first()
+    if story:
+        existing_audio = story.audio_options or []
+        if existing_audio and existing_audio[0].get("audio_url"):
+            audio_options[0]["audio_url"] = existing_audio[0]["audio_url"]
+        story.content = content
+        story.image_options = image_options
+        story.audio_options = audio_options
+        story.status = "active"
+        session.add(story)
+        session.flush()
+        return story
+
+    story = Story(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title=title,
+        content=content,
+        image_options=image_options,
+        audio_options=audio_options,
+        status="active",
+    )
+    session.add(story)
+    session.flush()
+    return story
+
+
+def _seed_carta_carlos_story(session: Session, teacher: User) -> Story:
+    return _seed_context_story(
+        session,
+        teacher,
+        CARTA_CARLOS_STORY_TITLE,
+        CARTA_CARLOS_STORY_CONTENT,
+        [
+            {"id": "carta_story_img_1", "description": "carta", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "✉️"},
+            {"id": "carta_story_img_2", "description": "Carlos escreve", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "✍️"},
+            {"id": "carta_story_img_3", "description": "Ana recebe", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "📬"},
+        ],
+        "carta_story_audio_1",
+    )
+
+
+def _seed_anedota_detetive_story(session: Session, teacher: User) -> Story:
+    return _seed_context_story(
+        session,
+        teacher,
+        ANEDOTA_DETETIVE_STORY_TITLE,
+        ANEDOTA_DETETIVE_STORY_CONTENT,
+        [
+            {"id": "anedota_story_img_1", "description": "detetive", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🕵️"},
+            {"id": "anedota_story_img_2", "description": "guarda-chuva", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "☂️"},
+            {"id": "anedota_story_img_3", "description": "humor", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "😄"},
+        ],
+        "anedota_story_audio_1",
+    )
 
 
 def _build_narration(enun: str, dados: dict, fmt: str, version_key: str) -> str:
@@ -131,7 +287,8 @@ def _build_output_data(versao: dict, version_key: str) -> dict:
 
         if fmt == "seq" and not zones and items:
             zones = [{"name": f"{i+1}°"} for i in range(len(items))]
-            correct = {item["name"]: f"{i+1}°" for i, item in enumerate(items)}
+            if not correct:
+                correct = {item["name"]: f"{i+1}°" for i, item in enumerate(items)}
 
         interaction_options.append({
             "type": interaction_type,
@@ -1260,10 +1417,22 @@ def _seed_apostila_activities(session: Session, teacher: User, profiles: dict) -
     total_activities = 0
     total_adaptations = 0
     _EXCLUDED_KEYS = {"code", "versoes"}
+    ravi_nina_story = _seed_ravi_nina_story(session, teacher)
+    carta_story = _seed_carta_carlos_story(session, teacher)
+    anedota_story = _seed_anedota_detetive_story(session, teacher)
+    story_by_code = {
+        **{code: ravi_nina_story for code in RAVI_NINA_ACTIVITY_CODES},
+        **{code: carta_story for code in CARTA_CARLOS_ACTIVITY_CODES},
+        **{code: anedota_story for code in ANEDOTA_DETETIVE_ACTIVITY_CODES},
+    }
 
     for act_data in APOSTILA_ACTIVITIES:
+        code = act_data.get("code")
         versoes = act_data["versoes"]
         activity_fields = {k: v for k, v in act_data.items() if k not in _EXCLUDED_KEYS}
+        linked_story = story_by_code.get(code)
+        if linked_story:
+            activity_fields["story_id"] = linked_story.id
 
         existing = session.exec(
             select(Activity).where(
@@ -1274,6 +1443,9 @@ def _seed_apostila_activities(session: Session, teacher: User, profiles: dict) -
 
         if existing:
             activity = existing
+            if linked_story and activity.story_id != linked_story.id:
+                activity.story_id = linked_story.id
+                session.add(activity)
         else:
             activity = Activity(
                 id=str(uuid.uuid4()),

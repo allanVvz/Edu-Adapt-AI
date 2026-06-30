@@ -10,6 +10,7 @@ class Activity(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     teacher_id: str = Field(foreign_key="users.id")
+    story_id: Optional[str] = Field(default=None, foreign_key="stories.id")
     title: str
     discipline: Optional[str] = None
     school_year: Optional[str] = None

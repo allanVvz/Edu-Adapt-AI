@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gcc \
     libpq-dev \
+    fonts-noto-color-emoji \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

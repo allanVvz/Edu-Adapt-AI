@@ -1,6 +1,7 @@
 from .user import User
 from .student_profile import StudentProfile
 from .student import Student, TeacherStudent
+from .story import Story
 from .activity import Activity
 from .adaptation import ActivityAdaptation
 from .attempt import StudentActivityAttempt
@@ -14,6 +15,7 @@ __all__ = [
     "StudentProfile",
     "Student",
     "TeacherStudent",
+    "Story",
     "Activity",
     "ActivityAdaptation",
     "StudentActivityAttempt",

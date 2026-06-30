@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
 from ..models.activity import Activity
+from ..models.story import Story
 from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.user import User
@@ -24,6 +25,18 @@ router = APIRouter(prefix="/adaptations", tags=["adaptations"])
 
 class FeedbackRequest(BaseModel):
     feedback: Optional[str] = None
+
+
+def _story_pdf_data(story: Story | None) -> dict | None:
+    if not story:
+        return None
+    return {
+        "id": story.id,
+        "title": story.title,
+        "content": story.content,
+        "image_options": story.image_options or [],
+        "audio_options": story.audio_options or [],
+    }
 
 
 @router.get("")
@@ -731,6 +744,7 @@ def download_adaptation_pdf(
     activity = session.get(Activity, adaptation.activity_id)
     title = activity.title if activity else "Atividade"
     discipline = activity.discipline if activity else None
+    story = session.get(Story, activity.story_id) if activity and activity.story_id else None
 
     profile_name: Optional[str] = None
     if adaptation.student_profile_id:
@@ -743,6 +757,7 @@ def download_adaptation_pdf(
         activity_title=title,
         config=cfg,
         discipline=discipline,
+        story_data=_story_pdf_data(story),
     ).render()
 
     safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]

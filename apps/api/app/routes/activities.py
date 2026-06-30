@@ -7,8 +7,10 @@ from ..database import get_session
 from ..models.user import User
 from ..models.activity import Activity
 from ..models.adaptation import ActivityAdaptation
+from ..models.story import Story
 from ..models.student_profile import StudentProfile
 from ..routes.auth import require_role
+from ..routes.stories import serialize_story_summary
 from ..services.openai_service import get_user_openai_key
 from ..agents.orchestrator import run_adaptation_pipeline
 import uuid
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 
 
 class ActivityCreate(BaseModel):
+    story_id: Optional[str] = None
     title: str
     discipline: Optional[str] = None
     school_year: Optional[str] = None
@@ -34,6 +37,58 @@ class ActivityCreate(BaseModel):
 
 class AdaptRequest(BaseModel):
     profile_id: Optional[str] = None
+
+
+def _get_allowed_story(story_id: Optional[str], current_user, session: Session) -> Story | None:
+    if not story_id:
+        return None
+    story = session.get(Story, story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if current_user.role != "admin" and story.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your story")
+    return story
+
+
+def _serialize_activity(activity: Activity, current_user, session: Session, adaptations: list[ActivityAdaptation] | None = None) -> dict:
+    all_adaptations = adaptations
+    if all_adaptations is None:
+        all_adaptations = session.exec(
+            select(ActivityAdaptation).where(ActivityAdaptation.activity_id == activity.id)
+        ).all()
+
+    teacher_name = None
+    if current_user.role == "admin":
+        t = session.get(User, activity.teacher_id)
+        teacher_name = t.name if t else None
+
+    story = session.get(Story, activity.story_id) if activity.story_id else None
+    return {
+        "id": activity.id,
+        "story_id": activity.story_id,
+        "story": serialize_story_summary(story),
+        "title": activity.title,
+        "discipline": activity.discipline,
+        "school_year": activity.school_year,
+        "pedagogical_objective": activity.pedagogical_objective,
+        "bncc_skill": activity.bncc_skill,
+        "activity_type": activity.activity_type,
+        "statement": activity.statement,
+        "question": activity.question,
+        "expected_answer": activity.expected_answer,
+        "correction_criteria": activity.correction_criteria,
+        "base_complexity": activity.base_complexity,
+        "original_modality": activity.original_modality,
+        "teacher_notes": activity.teacher_notes,
+        "status": activity.status,
+        "teacher_id": activity.teacher_id,
+        "teacher_name": teacher_name,
+        "adaptation_total": len(all_adaptations),
+        "adaptation_pending": len([x for x in all_adaptations if x.status == "review"]),
+        "adaptation_published": len([x for x in all_adaptations if x.status == "published"]),
+        "created_at": str(activity.created_at),
+        "updated_at": str(activity.updated_at),
+    }
 
 
 @router.get("")
@@ -57,25 +112,7 @@ def list_activities(
         all_adaptations = session.exec(
             select(ActivityAdaptation).where(ActivityAdaptation.activity_id == a.id)
         ).all()
-        teacher_name = None
-        if current_user.role == "admin":
-            t = session.get(User, a.teacher_id)
-            teacher_name = t.name if t else None
-        result.append({
-            "id": a.id,
-            "title": a.title,
-            "discipline": a.discipline,
-            "school_year": a.school_year,
-            "activity_type": a.activity_type,
-            "base_complexity": a.base_complexity,
-            "status": a.status,
-            "teacher_id": a.teacher_id,
-            "teacher_name": teacher_name,
-            "adaptation_total": len(all_adaptations),
-            "adaptation_pending": len([x for x in all_adaptations if x.status == "review"]),
-            "adaptation_published": len([x for x in all_adaptations if x.status == "published"]),
-            "created_at": str(a.created_at),
-        })
+        result.append(_serialize_activity(a, current_user, session, all_adaptations))
     return result
 
 
@@ -85,11 +122,12 @@ def create_activity(
     current_user=Depends(require_role("admin", "teacher")),
     session: Session = Depends(get_session),
 ):
+    _get_allowed_story(body.story_id, current_user, session)
     activity = Activity(id=str(uuid.uuid4()), teacher_id=current_user.id, **body.model_dump())
     session.add(activity)
     session.commit()
     session.refresh(activity)
-    return activity
+    return _serialize_activity(activity, current_user, session)
 
 
 @router.get("/{activity_id}")
@@ -99,9 +137,9 @@ def get_activity(
     session: Session = Depends(get_session),
 ):
     activity = session.get(Activity, activity_id)
-    if not activity or activity.teacher_id != current_user.id:
+    if not activity or (current_user.role != "admin" and activity.teacher_id != current_user.id):
         raise HTTPException(status_code=404, detail="Activity not found")
-    return activity
+    return _serialize_activity(activity, current_user, session)
 
 
 @router.put("/{activity_id}")
@@ -112,15 +150,18 @@ def update_activity(
     session: Session = Depends(get_session),
 ):
     activity = session.get(Activity, activity_id)
-    if not activity or activity.teacher_id != current_user.id:
+    if not activity or (current_user.role != "admin" and activity.teacher_id != current_user.id):
         raise HTTPException(status_code=404, detail="Activity not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    data = body.model_dump(exclude_unset=True)
+    if "story_id" in data:
+        _get_allowed_story(data.get("story_id"), current_user, session)
+    for k, v in data.items():
         setattr(activity, k, v)
     activity.updated_at = datetime.utcnow()
     session.add(activity)
     session.commit()
     session.refresh(activity)
-    return activity
+    return _serialize_activity(activity, current_user, session)
 
 
 @router.post("/{activity_id}/adapt", status_code=201)

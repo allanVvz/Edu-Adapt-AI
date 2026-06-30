@@ -13,6 +13,8 @@ import clsx from "clsx";
 
 interface Activity {
   id: string;
+  story_id?: string | null;
+  story?: StorySummary | null;
   title: string;
   discipline: string | null;
   school_year: string | null;
@@ -26,6 +28,8 @@ interface Activity {
 }
 
 interface Profile { id: string; name: string }
+interface StorySummary { id: string; title: string; status?: string }
+interface Story extends StorySummary { content: string }
 
 interface Adaptation {
   id: string;
@@ -53,6 +57,7 @@ const EMPTY_FORM = {
   pedagogical_objective: "", teacher_notes: "",
   activity_type: "association", statement: "", question: "", expected_answer: "",
   base_complexity: 2, original_modality: "association",
+  story_id: "", new_story_title: "", new_story_content: "",
 };
 
 export default function ActivitiesPage() {
@@ -60,6 +65,7 @@ export default function ActivitiesPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [stories, setStories] = useState<Story[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -94,6 +100,9 @@ export default function ActivitiesPage() {
     ]);
     setActivities(a.data);
     setProfiles(p.data);
+    api.get("/stories?status=active")
+      .then((r) => setStories(r.data))
+      .catch(() => setStories([]));
   }
 
   function handleFilterChange(status: string) {
@@ -144,6 +153,7 @@ export default function ActivitiesPage() {
       question: "",
       expected_answer: "",
       teacher_notes: "",
+      story_id: full?.story_id || "",
     });
     // Load full activity for editable fields
     api.get(`/activities/${activity.id}`).then((r) => {
@@ -155,6 +165,7 @@ export default function ActivitiesPage() {
         question: r.data.question || "",
         expected_answer: r.data.expected_answer || "",
         teacher_notes: r.data.teacher_notes || "",
+        story_id: r.data.story_id || "",
       });
     }).catch(() => {});
   }
@@ -162,8 +173,12 @@ export default function ActivitiesPage() {
   async function saveInlineEdit(activityId: string) {
     setSavingEdit(true);
     try {
+      const activityEditFields = { ...editFields };
+      delete activityEditFields.new_story_title;
+      delete activityEditFields.new_story_content;
       await api.put(`/activities/${activityId}`, {
-        ...editFields,
+        ...activityEditFields,
+        story_id: activityEditFields.story_id || null,
         activity_type: activities.find((a) => a.id === activityId)?.activity_type || "association",
         base_complexity: activities.find((a) => a.id === activityId)?.base_complexity || 2,
         original_modality: "association",
@@ -209,7 +224,38 @@ export default function ActivitiesPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post("/activities", form);
+      let storyId = form.story_id || null;
+      if ((form.new_story_title.trim() || form.new_story_content.trim()) && !(form.new_story_title.trim() && form.new_story_content.trim())) {
+        toast.error("Informe título e texto para criar um novo conto.");
+        return;
+      }
+      if (form.new_story_title.trim() && form.new_story_content.trim()) {
+        const { data } = await api.post("/stories", {
+          title: form.new_story_title.trim(),
+          content: form.new_story_content.trim(),
+          image_options: [
+            { id: "story_img_1", description: "personagem", illustration_type: "emoji", active_style: "pictogram", is_active: true, image_url: null, emoji: "📖" },
+          ],
+          audio_options: [
+            { id: "story_audio_1", script: form.new_story_content.trim(), tts_script: form.new_story_content.trim(), voice_style: "calma", voice: "shimmer", rhythm: 0.85, pitch: "normal", audio_url: null, source: "teacher" },
+          ],
+        });
+        storyId = data.id;
+      }
+      const activityPayload = {
+        title: form.title,
+        discipline: form.discipline,
+        school_year: form.school_year,
+        pedagogical_objective: form.pedagogical_objective,
+        teacher_notes: form.teacher_notes,
+        activity_type: form.activity_type,
+        statement: form.statement,
+        question: form.question,
+        expected_answer: form.expected_answer,
+        base_complexity: form.base_complexity,
+        original_modality: form.original_modality,
+      };
+      await api.post("/activities", { ...activityPayload, story_id: storyId });
       toast.success("Atividade criada.");
       setShowModal(false);
       setForm({ ...EMPTY_FORM });
@@ -294,6 +340,7 @@ export default function ActivitiesPage() {
                       {a.discipline && <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{a.discipline}</span>}
                       {a.school_year && <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{a.school_year}</span>}
                       {a.activity_type && <span className="text-xs bg-blue-50 text-blue-600 rounded-full px-2 py-0.5">{TYPE_LABEL[a.activity_type] || a.activity_type}</span>}
+                      {a.story && <span className="text-xs bg-amber-50 text-amber-700 rounded-full px-2 py-0.5">Conto: {a.story.title}</span>}
                       <span className={clsx("text-xs rounded-full px-2 py-0.5", {
                         "bg-green-50 text-green-700": a.status === "active",
                         "bg-gray-100 text-gray-500": a.status === "draft",
@@ -353,6 +400,19 @@ export default function ActivitiesPage() {
                               />
                             </div>
                           ))}
+                          <div className="grid grid-cols-3 gap-2 items-center">
+                            <label className="text-xs font-medium text-gray-500">Conto vinculado</label>
+                            <select
+                              className="col-span-2 border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white"
+                              value={(editFields as Record<string, string>).story_id || ""}
+                              onChange={(e) => setEditFields({ ...editFields, story_id: e.target.value })}
+                            >
+                              <option value="">Sem conto</option>
+                              {stories.map((story) => (
+                                <option key={story.id} value={story.id}>{story.title}</option>
+                              ))}
+                            </select>
+                          </div>
                           {[
                             { label: "Enunciado", key: "statement" },
                             { label: "Pergunta", key: "question" },
@@ -484,6 +544,38 @@ export default function ActivitiesPage() {
                 <input value={form.pedagogical_objective}
                   onChange={(e) => setForm({ ...form, pedagogical_objective: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-3 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Conto vinculado</label>
+                  <select
+                    value={form.story_id}
+                    onChange={(e) => setForm({ ...form, story_id: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  >
+                    <option value="">Sem conto</option>
+                    {stories.map((story) => (
+                      <option key={story.id} value={story.id}>{story.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Criar novo conto nesta atividade</label>
+                  <input
+                    value={form.new_story_title}
+                    onChange={(e) => setForm({ ...form, new_story_title: e.target.value })}
+                    placeholder="Título do conto"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white mb-2"
+                  />
+                  <textarea
+                    value={form.new_story_content}
+                    onChange={(e) => setForm({ ...form, new_story_content: e.target.value })}
+                    placeholder="Texto do conto"
+                    rows={3}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white resize-none"
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1">Se preencher título e texto, o novo conto será usado no lugar do conto selecionado.</p>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Tipo</label>

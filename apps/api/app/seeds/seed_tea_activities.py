@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.user import User
+from ..models.story import Story
 from ..models.activity import Activity
 from ..models.adaptation import ActivityAdaptation
 from ..models.student_profile import StudentProfile
@@ -36,6 +37,60 @@ VERSION_AUDIO_CONFIG = {
     "p2":     {"voice": "nova",    "rhythm": 0.80, "pitch": "normal"},
     "p3":     {"voice": "onyx",    "rhythm": 0.62, "pitch": "grave"},
 }
+
+ANA_STORY_TITLE = "A manhã da Ana"
+ANA_STORY_CONTENT = """Ana acordou cedo.
+Depois, Ana tomou café.
+Em seguida, Ana colocou a mochila e foi para a escola.
+Quando a aula terminou, Ana voltou para casa."""
+ANA_STORY_ACTIVITY_CODES = {"AT-PORT-03"}
+HORTA_STORY_TITLE = "A horta da escola"
+HORTA_STORY_CONTENT = """A horta da escola tem alface e tomate.
+As crianças regam as plantas toda manhã.
+A água ajuda as plantas a crescerem fortes e saudáveis."""
+HORTA_STORY_ACTIVITY_CODES = {"AT-PORT-01"}
+
+
+def _build_ana_story_media() -> tuple[list[dict], list[dict]]:
+    image_options = [
+        {"id": "ana_story_img_1", "description": "Ana acordando", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🌅"},
+        {"id": "ana_story_img_2", "description": "Ana tomando café", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🍽️"},
+        {"id": "ana_story_img_3", "description": "Ana indo para a escola", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🏫"},
+        {"id": "ana_story_img_4", "description": "Ana voltando para casa", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🏠"},
+    ]
+    audio_options = [{
+        "id": "ana_story_audio_1",
+        "script": ANA_STORY_CONTENT,
+        "tts_script": re.sub(r" {2,}", " ", ANA_STORY_CONTENT.replace("\n", " ")).strip(),
+        "voice_style": "calma",
+        "voice": "shimmer",
+        "rhythm": 0.85,
+        "pitch": "normal",
+        "audio_url": None,
+        "source": "seed",
+    }]
+    return image_options, audio_options
+
+
+def _build_horta_story_media() -> tuple[list[dict], list[dict]]:
+    image_options = [
+        {"id": "horta_story_img_1", "description": "horta", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🌱"},
+        {"id": "horta_story_img_2", "description": "alface", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🥬"},
+        {"id": "horta_story_img_3", "description": "tomate", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "🍅"},
+        {"id": "horta_story_img_4", "description": "regar", "illustration_type": "emoji", "active_style": "pictogram", "is_active": True, "image_url": None, "emoji": "💧"},
+    ]
+    audio_options = [{
+        "id": "horta_story_audio_1",
+        "script": HORTA_STORY_CONTENT,
+        "tts_script": re.sub(r" {2,}", " ", HORTA_STORY_CONTENT.replace("\n", " ")).strip(),
+        "voice_style": "calma",
+        "voice": "shimmer",
+        "rhythm": 0.85,
+        "pitch": "normal",
+        "audio_url": None,
+        "source": "seed",
+    }]
+    return image_options, audio_options
 
 FMT_TO_INTERACTION_TYPE = {
     "diss":  None,           # dissertativa — sem interação estruturada
@@ -140,7 +195,8 @@ def _build_output_data(versao: dict, version_key: str) -> dict:
 
         if fmt == "seq" and not zones and items:
             zones = [{"name": f"{i+1}°"} for i in range(len(items))]
-            correct = {item["name"]: f"{i+1}°" for i, item in enumerate(items)}
+            if not correct:
+                correct = {item["name"]: f"{i+1}°" for i, item in enumerate(items)}
 
         interaction_options.append({
             "type": interaction_type,
@@ -1809,6 +1865,74 @@ def _get_profiles(session: Session) -> dict:
     return profiles
 
 
+def _seed_ana_story(session: Session, teacher: User) -> Story:
+    image_options, audio_options = _build_ana_story_media()
+    story = session.exec(
+        select(Story).where(
+            Story.teacher_id == teacher.id,
+            Story.title == ANA_STORY_TITLE,
+        )
+    ).first()
+    if story:
+        existing_audio = story.audio_options or []
+        if existing_audio and existing_audio[0].get("audio_url"):
+            audio_options[0]["audio_url"] = existing_audio[0]["audio_url"]
+        story.content = ANA_STORY_CONTENT
+        story.image_options = image_options
+        story.audio_options = audio_options
+        story.status = "active"
+        session.add(story)
+        session.flush()
+        return story
+
+    story = Story(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title=ANA_STORY_TITLE,
+        content=ANA_STORY_CONTENT,
+        image_options=image_options,
+        audio_options=audio_options,
+        status="active",
+    )
+    session.add(story)
+    session.flush()
+    return story
+
+
+def _seed_horta_story(session: Session, teacher: User) -> Story:
+    image_options, audio_options = _build_horta_story_media()
+    story = session.exec(
+        select(Story).where(
+            Story.teacher_id == teacher.id,
+            Story.title == HORTA_STORY_TITLE,
+        )
+    ).first()
+    if story:
+        existing_audio = story.audio_options or []
+        if existing_audio and existing_audio[0].get("audio_url"):
+            audio_options[0]["audio_url"] = existing_audio[0]["audio_url"]
+        story.content = HORTA_STORY_CONTENT
+        story.image_options = image_options
+        story.audio_options = audio_options
+        story.status = "active"
+        session.add(story)
+        session.flush()
+        return story
+
+    story = Story(
+        id=str(uuid.uuid4()),
+        teacher_id=teacher.id,
+        title=HORTA_STORY_TITLE,
+        content=HORTA_STORY_CONTENT,
+        image_options=image_options,
+        audio_options=audio_options,
+        status="active",
+    )
+    session.add(story)
+    session.flush()
+    return story
+
+
 def _seed_adaptations(
     session: Session,
     activity: Activity,
@@ -1853,10 +1977,20 @@ def _seed_25_activities(session: Session, teacher: User, profiles: dict) -> None
     total_adaptations = 0
 
     _EXCLUDED_KEYS = {"code", "versoes"}
+    ana_story = _seed_ana_story(session, teacher)
+    horta_story = _seed_horta_story(session, teacher)
+    story_by_code = {
+        **{code: ana_story for code in ANA_STORY_ACTIVITY_CODES},
+        **{code: horta_story for code in HORTA_STORY_ACTIVITY_CODES},
+    }
 
     for act_data in TEA_ACTIVITIES:
+        code = act_data.get("code")
         versoes = act_data["versoes"]
         activity_fields = {k: v for k, v in act_data.items() if k not in _EXCLUDED_KEYS}
+        linked_story = story_by_code.get(code)
+        if linked_story:
+            activity_fields["story_id"] = linked_story.id
 
         existing = session.exec(
             select(Activity).where(
@@ -1867,6 +2001,9 @@ def _seed_25_activities(session: Session, teacher: User, profiles: dict) -> None
 
         if existing:
             activity = existing
+            if linked_story and activity.story_id != linked_story.id:
+                activity.story_id = linked_story.id
+                session.add(activity)
         else:
             activity = Activity(
                 id=str(uuid.uuid4()),
