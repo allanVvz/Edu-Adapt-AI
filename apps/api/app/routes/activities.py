@@ -12,6 +12,7 @@ from ..models.student_profile import StudentProfile
 from ..routes.auth import require_role
 from ..routes.stories import serialize_story_summary
 from ..services.openai_service import get_user_openai_key
+from ..services.educational_validation_service import apply_educational_quality_gate
 from ..agents.orchestrator import run_adaptation_pipeline
 import uuid
 
@@ -209,6 +210,7 @@ async def adapt_activity(
     openai_key = get_user_openai_key(session, current_user.id)
     output = await run_adaptation_pipeline(activity_dict, profile_dict, openai_key)
     used_fallback = output.pop("_fallback", False)
+    output = apply_educational_quality_gate(output, activity_dict)
     generated_by = "openai" if (openai_key and not used_fallback) else "mock"
 
     adaptation = ActivityAdaptation(

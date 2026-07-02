@@ -697,9 +697,9 @@ TEA_ACTIVITIES = [
                 "fmt": "dnd",
                 "enun": "Arraste para cada prato a parte certa da pizza.",
                 "dados": {
-                    "items": ["🍕 metade", "🍕🍕 inteira"],
+                    "items": ["◐ Metade da pizza", "● Pizza inteira"],
                     "zones": [{"name": "Prato da METADE"}, {"name": "Prato da pizza INTEIRA"}],
-                    "correct_answer": {"🍕 metade": "Prato da METADE", "🍕🍕 inteira": "Prato da pizza INTEIRA"},
+                    "correct_answer": {"◐ Metade da pizza": "Prato da METADE", "● Pizza inteira": "Prato da pizza INTEIRA"},
                     "instructions": "Arraste para o prato certo.",
                 },
                 "apoios": ["pizza"],
@@ -710,8 +710,8 @@ TEA_ACTIVITIES = [
                 "enun": "Toque na METADE da pizza.",
                 "dados": {
                     "items": ["Minha resposta"],
-                    "zones": ["🍕 Metade", "🍕🍕 Inteira"],
-                    "correct_answer": {"correct_zone": "🍕 Metade"},
+                    "zones": ["◐ Metade da pizza", "● Pizza inteira"],
+                    "correct_answer": {"correct_zone": "◐ Metade da pizza"},
                     "instructions": "Toque.",
                 },
                 "apoios": ["pizza"],

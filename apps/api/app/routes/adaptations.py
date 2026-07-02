@@ -14,6 +14,7 @@ from ..models.user import User
 from ..routes.auth import require_role
 from ..services.openai_service import get_user_openai_key, generate_adaptation_with_ai, _mock_adaptation, IMAGE_STYLES, VALID_IMAGE_MODELS, _parse_image_error, _save_image, _get_profile_image_modifier, generate_audio_tts, make_openai_client
 from ..services.static_url_service import normalized_output_data
+from ..services.educational_validation_service import apply_educational_quality_gate, educational_blockers
 from ..services.pdf_service import AdaptationPDFRenderer
 from ..services.pdf_constants import get_profile_config
 from ..models.gallery_image import GalleryImage
@@ -181,6 +182,17 @@ def publish_adaptation(
         raise HTTPException(status_code=404, detail="Adaptation not found")
     if adaptation.status not in ("approved", "review", "rejected"):
         raise HTTPException(status_code=400, detail="Cannot publish adaptation in current status")
+    activity = session.get(Activity, adaptation.activity_id)
+    checked_output = apply_educational_quality_gate(adaptation.output_data or {}, _activity_math_context(activity))
+    blockers = educational_blockers(checked_output)
+    if blockers:
+        adaptation.output_data = checked_output
+        adaptation.status = "review"
+        adaptation.validator_feedback = "; ".join(blocker.get("message", "Erro educacional") for blocker in blockers)
+        session.add(adaptation)
+        session.commit()
+        raise HTTPException(status_code=422, detail={"message": "Educational validation failed", "blockers": blockers})
+    adaptation.output_data = checked_output
     adaptation.status = "published"
     adaptation.updated_at = datetime.utcnow()
     session.add(adaptation)
@@ -207,6 +219,8 @@ async def reprocess_adaptation(
         "statement": activity.statement if activity else "",
         "question": activity.question if activity else "",
         "expected_answer": activity.expected_answer if activity else "",
+        "discipline": activity.discipline if activity else "",
+        "pedagogical_objective": activity.pedagogical_objective if activity else "",
         "activity_type": activity.activity_type if activity else "",
     }
     profile_dict = {}
@@ -225,6 +239,7 @@ async def reprocess_adaptation(
     else:
         output = _mock_adaptation(activity_dict, profile_dict)
         generated_by = "mock"
+    output = apply_educational_quality_gate(output, activity_dict)
 
     new_adaptation = ActivityAdaptation(
         id=str(uuid.uuid4()),

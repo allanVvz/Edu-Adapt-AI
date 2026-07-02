@@ -3,6 +3,7 @@ from typing import Any
 
 from .openai_service import _API_BASE_URL
 from .math_formatting_service import enhance_math_output_data
+from .educational_validation_service import apply_educational_quality_gate
 
 
 def normalize_static_urls(value: Any, api_base_url: str | None = None) -> Any:
@@ -29,4 +30,5 @@ def normalized_output_data(
     activity: dict | None = None,
 ) -> dict:
     data = enhance_math_output_data(output_data or {}, activity)
+    data = apply_educational_quality_gate(data, activity)
     return normalize_static_urls(data, api_base_url)

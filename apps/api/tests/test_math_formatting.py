@@ -43,6 +43,38 @@ def test_supports_subtraction_multiplication_and_division():
         assert block["symbol"] == symbol
 
 
+def test_fraction_answer_is_not_treated_as_division():
+    result = enhance_math_output_data(
+        {"text_adaptations": [{"version": 1, "content": "Cada parte representa 1/2 da pizza."}]},
+        {
+            "discipline": "Matemática",
+            "title": "Fração: a metade da pizza",
+            "question": "Cada parte representa quanto da pizza?",
+            "expected_answer": "1/2",
+        },
+    )
+
+    assert "math_formatting" not in result
+
+
+def test_metadata_dates_do_not_create_subtraction_blocks():
+    result = enhance_math_output_data(
+        {
+            "text_adaptations": [{"version": 1, "content": "Qual figura tem tres lados?"}],
+            "image_options": [{"generated": {"pictogram": {"generated_at": "2026-07-02T10:00:00"}}}],
+            "audio_options": [{"audio_url": "http://localhost/static/audio/1111-2222.mp3"}],
+        },
+        {
+            "discipline": "Matemática",
+            "title": "Formas geometricas",
+            "question": "Qual figura tem tres lados?",
+            "expected_answer": "Triangulo",
+        },
+    )
+
+    assert "math_formatting" not in result
+
+
 def test_pdf_renderer_accepts_math_formatting_block():
     output = enhance_math_output_data(
         {
