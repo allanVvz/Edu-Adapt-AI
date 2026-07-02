@@ -1357,6 +1357,164 @@ APOSTILA_ACTIVITIES = [
 ]
 
 
+def _extra_mc_versions(question: str, correct: str, distractors: list[str], supports: list[str]) -> dict:
+    options = [correct, *distractors]
+    reduced = options[:3]
+    return {
+        "padrao": {
+            "fmt": "mc",
+            "enun": question,
+            "dados": {
+                "items": ["Minha resposta"],
+                "zones": options,
+                "correct_answer": {"correct_zone": correct},
+                "instructions": "Escolha a resposta correta.",
+            },
+            "apoios": supports,
+        },
+        "p1": {
+            "fmt": "mc",
+            "enun": f"Leia com apoio visual. {question}",
+            "dados": {
+                "items": ["Minha resposta"],
+                "zones": reduced,
+                "correct_answer": {"correct_zone": correct},
+                "instructions": "Toque na resposta certa.",
+            },
+            "apoios": supports,
+        },
+        "p2": {
+            "fmt": "mc",
+            "enun": f"{question} [pausa] Escolha uma opcao.",
+            "dados": {
+                "items": ["Minha resposta"],
+                "zones": reduced,
+                "correct_answer": {"correct_zone": correct},
+                "instructions": "Escolha uma opcao.",
+            },
+            "apoios": supports[:1],
+        },
+        "p3": {
+            "fmt": "toque",
+            "enun": f"Toque em {correct}.",
+            "dados": {
+                "items": ["Minha resposta"],
+                "zones": [correct, distractors[0] if distractors else "Outra"],
+                "correct_answer": {"correct_zone": correct},
+                "instructions": "Toque.",
+            },
+            "apoios": supports[:1],
+        },
+    }
+
+
+def _extra_dnd_versions(question: str, items: list[str], zones: list[str], correct: dict, supports: list[str]) -> dict:
+    simple_items = items[:4]
+    simple_correct = {k: v for k, v in correct.items() if k in simple_items}
+    return {
+        "padrao": {
+            "fmt": "dnd",
+            "enun": question,
+            "dados": {
+                "items": items,
+                "zones": [{"name": z} for z in zones],
+                "correct_answer": correct,
+                "instructions": "Arraste cada palavra para o grupo correto.",
+            },
+            "apoios": supports,
+        },
+        "p1": {
+            "fmt": "dnd",
+            "enun": f"{question} Use as figuras de apoio.",
+            "dados": {
+                "items": simple_items,
+                "zones": [{"name": z} for z in zones],
+                "correct_answer": simple_correct,
+                "instructions": "Arraste para o grupo certo.",
+            },
+            "apoios": supports,
+        },
+        "p2": {
+            "fmt": "dnd",
+            "enun": f"{question} [pausa] Mova um item de cada vez.",
+            "dados": {
+                "items": simple_items[:3],
+                "zones": [{"name": z} for z in zones],
+                "correct_answer": {k: v for k, v in simple_correct.items() if k in simple_items[:3]},
+                "instructions": "Mova devagar.",
+            },
+            "apoios": supports[:1],
+        },
+        "p3": {
+            "fmt": "toque",
+            "enun": f"Toque em {simple_items[0]}.",
+            "dados": {
+                "items": ["Minha resposta"],
+                "zones": [simple_items[0], simple_items[1]],
+                "correct_answer": {"correct_zone": simple_items[0]},
+                "instructions": "Toque.",
+            },
+            "apoios": supports[:1],
+        },
+    }
+
+
+APOSTILA_ACTIVITIES.extend([
+    {
+        "code": "AT-PORT-20",
+        "title": "Poema visual: forma e sentido",
+        "discipline": "Português",
+        "school_year": "até 7º ano",
+        "pedagogical_objective": "Identificar a relacao entre formato visual e sentido em um poema visual.",
+        "activity_type": "multiple_choice",
+        "statement": "O poema visual usa as palavras para formar uma imagem.",
+        "question": "No poema visual da apostila, qual animal o formato das palavras representa?",
+        "expected_answer": "Cachorro",
+        "versoes": _extra_mc_versions(
+            "No poema visual, qual animal o formato das palavras representa?",
+            "Cachorro",
+            ["Gato", "Passaro", "Peixe"],
+            ["cachorro", "poema visual"],
+        ),
+    },
+    {
+        "code": "AT-PORT-21",
+        "title": "Sons do X: classificar palavras",
+        "discipline": "Português",
+        "school_year": "até 7º ano",
+        "pedagogical_objective": "Reconhecer diferentes sons da letra X em palavras.",
+        "activity_type": "drag_drop",
+        "statement": "A letra X pode ter sons diferentes, como CH, Z, S ou CS.",
+        "question": "Arraste cada palavra para o som correto da letra X.",
+        "expected_answer": "xícara-CH; exemplo-Z; texto-S; táxi-CS",
+        "versoes": _extra_dnd_versions(
+            "Arraste cada palavra para o som correto do X.",
+            ["xícara", "exemplo", "texto", "táxi"],
+            ["Som de CH", "Som de Z", "Som de S", "Som de CS"],
+            {"xícara": "Som de CH", "exemplo": "Som de Z", "texto": "Som de S", "táxi": "Som de CS"},
+            ["letra X", "xícara"],
+        ),
+    },
+    {
+        "code": "AT-PORT-22",
+        "title": "Ortografia: LI ou LH",
+        "discipline": "Português",
+        "school_year": "até 7º ano",
+        "pedagogical_objective": "Diferenciar palavras escritas com LI e com LH.",
+        "activity_type": "multiple_choice",
+        "statement": "Algumas palavras usam LI e outras usam LH.",
+        "question": "Qual palavra completa FO__A corretamente?",
+        "expected_answer": "FOLHA",
+        "versoes": _extra_mc_versions(
+            "Qual palavra completa FO__A corretamente?",
+            "FOLHA",
+            ["FOLIA", "FOILA", "FOLA"],
+            ["folha", "letra LH"],
+        ),
+    },
+])
+
+
 # ─── Seed functions (idênticas ao padrão de seed_tea_activities.py) ──────────
 
 def _get_teacher(session: Session) -> User:

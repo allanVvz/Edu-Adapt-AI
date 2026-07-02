@@ -26,6 +26,9 @@ def run():
     from .seed_apostila_portugues import run as run_apostila
     run_apostila()
 
+    from .seed_apostila_matematica import run as run_apostila_matematica
+    run_apostila_matematica()
+
 
 def _seed_users(session: Session):
     users = [
