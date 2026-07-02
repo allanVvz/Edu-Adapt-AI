@@ -1,0 +1,49 @@
+{
+  "perfil": "B",
+  "nome": "Explorador Visual",
+  "nivel_suporte_DSM5": 2,
+  "descricao": "Estudante com limitações mais visíveis na comunicação verbal e não verbal. Necessita de adaptação pedagógica estruturada e suporte visual robusto. Beneficia-se de rotinas fixas com antecipação visual.",
+  "fundamentacao": ["DSM-5-TR (APA, 2022)", "Rossetto & Marcon (2024)", "REASE v.10 (2024)", "TEACCH - Schopler"],
+  "atributos": {
+    "linguagem_literal": true,
+    "modalidade_resposta": "visual_ou_minima",
+    "suporte_visual": "alto",
+    "formato_texto": "fragmentado",
+    "sequencia_passos": "sempre",
+    "estrutura_fixa": true,
+    "estimulos_extras": "remover",
+    "um_comando_por_vez": true,
+    "feedback_imediato": true,
+    "densidade_texto": "baixa",
+    "abertura_resposta": "estruturada",
+    "tema_ancora": "variavel"
+  },
+  "tipos_atividade_recomendados": [
+    "arrastar_soltar",
+    "multipla_escolha",
+    "verdadeiro_falso",
+    "sequenciamento",
+    "pareamento",
+    "completar_lacunas"
+  ],
+  "restricoes_pedagogicas": [
+    "Sem texto corrido (fragmentar em blocos)",
+    "Frases máximo 10 palavras",
+    "Sempre indicar imagem/pictograma",
+    "Nunca múltiplos comandos",
+    "Sem dissertação complexa",
+    "Reforço positivo após cada etapa"
+  ],
+  "pontos_fortes": [
+    "Processamento visual forte",
+    "Resposta consistente a rotinas",
+    "Memória de procedimentos visuais",
+    "Engajamento com temas de interesse"
+  ],
+  "recursos_complementares": [
+    "PECS (Sistema de Comunicação por Troca de Figuras)",
+    "ARASAAC (pictogramas)",
+    "Agendas visuais (TEACCH)",
+    "Tecnologia Assistiva digital"
+  ]
+}

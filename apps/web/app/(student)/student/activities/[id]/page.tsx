@@ -1,14 +1,17 @@
-﻿"use client";
+"use client";
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import StudentLayout from "@/components/layout/StudentLayout";
+import StudentHeaderMenu from "@/components/layout/StudentHeaderMenu";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { CheckCircle, Volume2, RotateCcw, FileDown, Loader2, BookOpen } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle, FileDown, Loader2, RotateCcw, Volume2, BookOpen } from "lucide-react";
 import clsx from "clsx";
+import { getDisciplineHref, groupActivitiesByDiscipline, type StudentActivityCard } from "@/lib/student-area";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 type ActivityItem = string | { name?: string; description?: string; image_url?: string; image_prompt?: string; emoji?: string; symbol?: string };
 type ActivityZone = string | { name?: string; description?: string };
 type InteractionType = "drag_and_drop" | "sequencing" | "multiple_choice";
@@ -50,7 +53,6 @@ interface OutputData {
   interaction_options?: InteractionOption[];
   image_options?: ImageOption[];
 }
-
 interface StoryData {
   id: string;
   title: string;
@@ -59,7 +61,7 @@ interface StoryData {
   image_options?: ImageOption[];
 }
 
-// â”€â”€â”€ Item card (shared across interaction types) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 function ItemCard({
   item,
   feedback,
@@ -117,8 +119,7 @@ function ItemCard({
     </div>
   );
 }
-
-// â”€â”€â”€ DragAndDrop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Drag and drop
 function DragAndDrop({
   interaction,
   answers,
@@ -309,10 +310,10 @@ function Sequencing({
                   !fb && "border-blue-200 bg-white",
                 )}
               >
-                <span className="text-lg font-bold text-blue-600 w-7 text-center">{idx + 1}Â°</span>
+                <span className="text-lg font-bold text-blue-600 w-7 text-center">{idx + 1}º</span>
                 <span className="font-medium text-gray-800">{lbl}</span>
-                {fb === "correct" && <span className="ml-auto text-green-600 text-sm font-bold">âœ“</span>}
-                {fb === "incorrect" && <span className="ml-auto text-red-500 text-sm font-bold">âœ—</span>}
+                {fb === "correct" && <span className="ml-auto text-green-600 text-sm font-bold">Correto</span>}
+                {fb === "incorrect" && <span className="ml-auto text-red-500 text-sm font-bold">Rever</span>}
               </div>
             );
           })}
@@ -323,7 +324,7 @@ function Sequencing({
       {unplaced.length > 0 && (
         <>
           <p className="text-center text-sm text-gray-500 mb-3">
-            Toque no item que vem em <strong>{ordered.length + 1}Â° lugar</strong>
+            Toque no item que vem em <strong>{ordered.length + 1}º lugar</strong>
           </p>
           <div className="flex flex-wrap gap-2 justify-center mb-4">
             {unplaced.map((item) => (
@@ -344,14 +345,14 @@ function Sequencing({
           onClick={handleReset}
           className="w-full flex items-center justify-center gap-2 border border-gray-200 text-gray-500 text-sm py-2 rounded-xl mt-1 hover:bg-gray-50"
         >
-          <RotateCcw size={13} /> RecomeÃ§ar
+          <RotateCcw size={13} /> Recomeçar
         </button>
       )}
     </>
   );
 }
 
-// â”€â”€â”€ MultipleChoice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Multiple choice
 function MultipleChoice({
   interaction,
   answers,
@@ -392,12 +393,14 @@ function MultipleChoice({
   );
 }
 
-// â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Main page
 export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [title, setTitle] = useState<string | null>(null);
   const [story, setStory] = useState<StoryData | null>(null);
+  const [discipline, setDiscipline] = useState<string | null>(null);
+  const [activities, setActivities] = useState<StudentActivityCard[]>([]);
   const [output, setOutput] = useState<OutputData | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, "correct" | "incorrect">>({});
@@ -457,18 +460,23 @@ export default function StudentActivityPage() {
   }
 
   useEffect(() => {
-    api.get(`/student/activities/${id}`)
-      .then(async (r) => {
-        setTitle(r.data.title ?? null);
-        setStory(r.data.story ?? null);
-        setOutput(r.data.output);
+    Promise.all([
+      api.get(`/student/activities/${id}`),
+      api.get("/student/activities"),
+    ])
+      .then(async ([activityRes, listRes]) => {
+        setTitle(activityRes.data.title ?? null);
+        setDiscipline(activityRes.data.discipline ?? null);
+        setStory(activityRes.data.story ?? null);
+        setOutput(activityRes.data.output);
+        setActivities(listRes.data ?? []);
         await api.post(`/student/activities/${id}/start`).catch(() => {});
       })
       .catch(() => {
-        toast.error("Atividade nÃ£o encontrada.");
+        toast.error("Atividade não encontrada.");
         router.push("/student");
       });
-  }, [id]);
+  }, [id, router]);
 
   function handleAnswer(itemLabel: string, zoneLabel: string | null) {
     setAnswers((prev) => {
@@ -548,8 +556,37 @@ export default function StudentActivityPage() {
     ? interaction.items.every((item) => answers[getLabel(item)])
     : false;
 
+  const disciplineGroups = groupActivitiesByDiscipline(activities);
+  const nextActivityId = (() => {
+    const ordered = [...activities].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const current = ordered.findIndex((activity) => activity.id === id);
+    if (current === -1) return null;
+
+    if (discipline) {
+      const sameDiscipline = ordered.filter((activity) => (activity.discipline || "Sem disciplina") === discipline);
+      const currentInDiscipline = sameDiscipline.findIndex((activity) => activity.id === id);
+      if (currentInDiscipline >= 0 && sameDiscipline[currentInDiscipline + 1]) {
+        return sameDiscipline[currentInDiscipline + 1].id;
+      }
+    }
+
+    return ordered[current + 1]?.id ?? null;
+  })();
+
+  const headerAction = (
+    <StudentHeaderMenu
+      disciplines={disciplineGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        href: getDisciplineHref(group.id),
+      }))}
+      onExportAll={handleExportPDF}
+      exportDisabled={exporting}
+    />
+  );
+
   return (
-    <StudentLayout headerAction={exportButton}>
+    <StudentLayout headerAction={headerAction}>
       {story && (
         <section className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden mb-5">
           <div className="bg-amber-50 border-b border-amber-100 px-5 py-4">
@@ -612,40 +649,12 @@ export default function StudentActivityPage() {
         <h1 className="text-lg font-bold text-gray-900 mb-4">{title}</h1>
       )}
 
-      {submitted && result ? (
-        <div className="text-center py-10">
-          <CheckCircle size={48} className="mx-auto text-green-500 mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">ParabÃ©ns!</h2>
-          <p className="text-gray-600 mb-4">VocÃª completou a atividade.</p>
-          <div className="inline-block bg-green-50 border border-green-200 rounded-2xl px-8 py-4 mb-6">
-            <p className="text-4xl font-bold text-green-700">{result.percentage}%</p>
-            <p className="text-sm text-gray-500">{result.score} de {result.max_score} pontos</p>
-          </div>
-
-          {/* Per-item feedback */}
-          {interaction && Object.keys(feedback).length > 0 && (
-            <div className="text-left max-w-sm mx-auto mb-6 space-y-2">
-              {interaction.items.map((item) => {
-                const lbl = getLabel(item);
-                const fb = feedback[lbl];
-                const correct = interaction.correct_answer?.[lbl] ?? interaction.correct_answer?.correct_zone;
-                return (
-                  <div key={lbl} className={clsx("flex items-center justify-between rounded-lg px-4 py-2 text-sm", fb === "correct" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
-                    <span className="font-medium">{lbl}</span>
-                    <span className="text-xs">{fb === "correct" ? "âœ“ correto" : correct ? `âœ— era "${correct}"` : "âœ— incorreto"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <button onClick={() => router.push("/student")}
-            className="block mx-auto bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-xl">
-            Voltar
-          </button>
-        </div>
-      ) : (
-        <div>
+      <div
+        className={clsx(
+          "transition duration-300",
+          submitted && result && "pointer-events-none select-none opacity-60 blur-[3px]",
+        )}
+      >
           {visualImages.length > 0 && (
             <div className="flex gap-3 overflow-x-auto mb-4 pb-1">
               {visualImages.map((img) => (
@@ -730,12 +739,108 @@ export default function StudentActivityPage() {
                   onClick={() => setAnswers({})}
                   className="w-full flex items-center justify-center gap-2 border border-gray-200 text-gray-500 text-sm py-2 rounded-xl mt-2 hover:bg-gray-50"
                 >
-                  <RotateCcw size={13} /> RecomeÃ§ar
+                  <RotateCcw size={13} /> Recomeçar
                 </button>
               )}
             </div>
           )}
-        </div>
+      </div>
+
+      {submitted && result && (
+        <>
+          <Link
+            href="/student"
+            className="fixed left-0 top-1/2 z-40 flex -translate-y-1/2 items-center gap-2 rounded-r-2xl border border-l-0 border-white/70 bg-white/90 px-3 py-4 text-sm font-semibold text-blue-700 shadow-xl backdrop-blur"
+          >
+            <ArrowLeft size={18} />
+            Lista
+          </Link>
+
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm [animation:result-backdrop-in_180ms_ease-out]">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="activity-result-title"
+              className="w-full max-w-xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl [animation:result-modal-in_220ms_ease-out]"
+            >
+              <div className="border-b border-slate-100 bg-gradient-to-br from-emerald-50 to-blue-50 px-6 py-6 text-center">
+                <CheckCircle size={44} className="mx-auto mb-3 text-emerald-500" />
+                <h2 id="activity-result-title" className="text-2xl font-bold text-slate-950">
+                  Parabéns!
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">Você completou a atividade.</p>
+                <div className="mt-5 inline-flex items-end gap-2 rounded-2xl border border-emerald-100 bg-white px-6 py-4 shadow-sm">
+                  <span className="text-5xl font-black leading-none text-emerald-600">{result.percentage}%</span>
+                  <span className="pb-1 text-sm font-medium text-slate-500">
+                    {result.score} de {result.max_score} pontos
+                  </span>
+                </div>
+              </div>
+
+              {interaction && Object.keys(feedback).length > 0 && (
+                <div className="max-h-64 overflow-auto px-6 py-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Resultado individual
+                  </p>
+                  <div className="space-y-2">
+                    {interaction.items.map((item) => {
+                      const itemLabel = getLabel(item);
+                      const displayLabel =
+                        interaction.type === "multiple_choice"
+                          ? answers[itemLabel] || itemLabel
+                          : itemLabel;
+                      const itemFeedback = feedback[itemLabel];
+                      const correct = interaction.correct_answer?.[itemLabel] ?? interaction.correct_answer?.correct_zone;
+
+                      return (
+                        <div
+                          key={itemLabel}
+                          className={clsx(
+                            "flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm",
+                            itemFeedback === "correct"
+                              ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                              : "border-rose-100 bg-rose-50 text-rose-800",
+                          )}
+                        >
+                          <span className="min-w-0 truncate font-semibold">{displayLabel}</span>
+                          <span className="shrink-0 text-xs font-bold">
+                            {itemFeedback === "correct" ? "Correto" : correct ? `Resposta: ${correct}` : "Rever"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-6 py-5 sm:flex-row">
+                {nextActivityId ? (
+                  <Link
+                    href={`/student/activities/${nextActivityId}`}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-base font-bold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Próxima atividade
+                    <ArrowRight size={18} />
+                  </Link>
+                ) : (
+                  <Link
+                    href="/student"
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-base font-bold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Voltar para lista
+                  </Link>
+                )}
+                <Link
+                  href="/student"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-6 py-3 text-base font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                >
+                  <ArrowLeft size={18} />
+                  Lista
+                </Link>
+              </div>
+            </section>
+          </div>
+        </>
       )}
     </StudentLayout>
   );

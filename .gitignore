@@ -51,3 +51,6 @@ apps/web/public/generated/
 *.jpeg
 *.gif
 *.webp
+
+# Local agent/browser verification artifacts
+.codex-screenshots/

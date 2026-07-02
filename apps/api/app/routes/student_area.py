@@ -12,7 +12,7 @@ from ..models.student import Student
 from ..models.student_profile import StudentProfile
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
-from ..routes.stories import serialize_story_detail
+from ..routes.stories import serialize_story_detail, serialize_story_summary
 from ..services.static_url_service import normalized_output_data
 from ..services.pdf_service import AdaptationPDFRenderer, build_combined_pdf
 from ..services.pdf_constants import get_profile_config
@@ -60,6 +60,12 @@ def _story_pdf_data(story: Story | None) -> dict | None:
         "image_options": story.image_options or [],
         "audio_options": story.audio_options or [],
     }
+
+
+def _percent(score: float | None, max_score: float | None) -> int | None:
+    if score is None or max_score in (None, 0):
+        return None
+    return round((score / max_score) * 100)
 
 
 def _calculate_score(adaptation_output: dict, response: dict) -> tuple[float, float]:
@@ -125,15 +131,73 @@ def list_student_activities(
         by_id[a.id] = a
     adaptations = sorted(by_id.values(), key=lambda a: a.created_at, reverse=True)
 
+    completed_attempts = session.exec(
+        select(StudentActivityAttempt).where(
+            StudentActivityAttempt.student_id == student.id,
+            StudentActivityAttempt.status == "completed",
+        )
+    ).all()
+    attempts_by_adaptation: dict[str, StudentActivityAttempt] = {}
+    for attempt in sorted(completed_attempts, key=lambda a: a.finished_at or a.created_at, reverse=True):
+        if attempt.adaptation_id not in attempts_by_adaptation:
+            attempts_by_adaptation[attempt.adaptation_id] = attempt
+
     result = []
     for a in adaptations:
         activity = session.get(Activity, a.activity_id)
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+        attempt = attempts_by_adaptation.get(a.id)
         result.append({
             "id": a.id,
             "activity_id": a.activity_id,
             "title": activity.title if activity else None,
+            "discipline": activity.discipline if activity else None,
+            "story": serialize_story_summary(story),
             "status": a.status,
             "created_at": a.created_at,
+            "completed_at": attempt.finished_at if attempt else None,
+            "score": attempt.score if attempt else None,
+            "max_score": attempt.max_score if attempt else None,
+            "percentage": _percent(attempt.score, attempt.max_score) if attempt else None,
+            "has_result": attempt is not None,
+        })
+    return result
+
+
+@router.get("/results")
+def list_student_results(
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+    attempts = session.exec(
+        select(StudentActivityAttempt).where(
+            StudentActivityAttempt.student_id == student.id,
+            StudentActivityAttempt.status == "completed",
+        ).order_by(StudentActivityAttempt.finished_at.desc(), StudentActivityAttempt.created_at.desc())
+    ).all()
+
+    result = []
+    for attempt in attempts:
+        activity = session.get(Activity, attempt.activity_id)
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+        result.append({
+            "id": attempt.id,
+            "adaptation_id": attempt.adaptation_id,
+            "activity_id": attempt.activity_id,
+            "title": activity.title if activity else None,
+            "discipline": activity.discipline if activity else None,
+            "story": serialize_story_summary(story),
+            "score": attempt.score,
+            "max_score": attempt.max_score,
+            "percentage": _percent(attempt.score, attempt.max_score),
+            "status": attempt.status,
+            "finished_at": attempt.finished_at,
+            "created_at": attempt.created_at,
+            "completion_time_seconds": attempt.completion_time_seconds,
         })
     return result
 
@@ -221,6 +285,8 @@ def get_student_activity(
         "id": adaptation.id,
         "activity_id": adaptation.activity_id,
         "title": activity.title if activity else None,
+        "discipline": activity.discipline if activity else None,
+        "story_summary": serialize_story_summary(story),
         "story": serialize_story_detail(story, str(request.base_url).rstrip("/")),
         "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
     }

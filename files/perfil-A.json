@@ -1,0 +1,45 @@
+{
+  "perfil": "A",
+  "nome": "Leitor Silencioso",
+  "nivel_suporte_DSM5": 1,
+  "descricao": "Estudante que comunica e interage, mas enfrenta dificuldades sociais e de interpretação contextual. Alta funcionalidade em rotinas estruturadas. Leitura literal do mundo.",
+  "fundamentacao": ["DSM-5-TR (APA, 2022)", "CAED-UFSM (2023)", "Pinto et al. (2024)"],
+  "atributos": {
+    "linguagem_literal": true,
+    "tema_ancora": "variavel",
+    "transicao_gradual": true,
+    "suporte_visual": "moderado",
+    "inferencia_social": "evitar",
+    "abertura_resposta": "estruturada",
+    "densidade_texto": "baixa",
+    "um_comando_por_vez": false,
+    "feedback_imediato": false,
+    "sequencia_passos": "quando_necessario",
+    "modalidade_resposta": ["escrita", "multipla_escolha", "arrastar_soltar"],
+    "formato_texto": "corrido_curto",
+    "estimulos_extras": "reduzir"
+  },
+  "tipos_atividade_recomendados": [
+    "multipla_escolha",
+    "verdadeiro_falso",
+    "dissertacao_simples",
+    "dissertacao_complexa",
+    "completar_lacunas",
+    "pareamento",
+    "sequenciamento",
+    "arrastar_soltar"
+  ],
+  "restricoes_pedagogicas": [
+    "Sem metáforas ou linguagem figurada",
+    "Sem duplo sentido",
+    "Sem ironia ou humor ambíguo",
+    "Evitar múltiplos comandos simultâneos",
+    "Frases máximo 20 palavras"
+  ],
+  "pontos_fortes": [
+    "Boa memória visual e sequencial",
+    "Alta funcionalidade em rotinas",
+    "Capacidade de leitura e escrita",
+    "Hiperfoco aproveitável como motivação"
+  ]
+}
