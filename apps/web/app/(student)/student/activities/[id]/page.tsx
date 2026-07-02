@@ -457,6 +457,22 @@ function MathFormattingPanel({ formatting }: { formatting?: MathFormatting }) {
   );
 }
 
+function NarrationTextDetails({ script }: { script?: string }) {
+  const text = script?.trim();
+  if (!text) return null;
+
+  return (
+    <details className="mt-3 rounded-xl border border-blue-100 bg-white/70">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-blue-700">
+        Ver texto da locução
+      </summary>
+      <pre className="border-t border-blue-100 px-3 py-3 text-sm text-gray-700 whitespace-pre-wrap font-sans">
+        {text}
+      </pre>
+    </details>
+  );
+}
+
 // Main page
 export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
@@ -702,7 +718,7 @@ export default function StudentActivityPage() {
                     Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
                   </p>
                 )}
-                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{storyAudio.script}</pre>
+                <NarrationTextDetails script={storyAudio.script} />
               </div>
             )}
           </div>
@@ -768,7 +784,7 @@ export default function StudentActivityPage() {
                     Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
                   </p>
                 )}
-                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{audio.script}</pre>
+                <NarrationTextDetails script={audio.script} />
               </div>
             </div>
           )}

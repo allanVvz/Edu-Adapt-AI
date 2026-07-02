@@ -80,6 +80,33 @@ interface AdaptationData {
   teacher_feedback: string | null;
 }
 
+function NarrationTextDetails({
+  label,
+  script,
+  compact = false,
+}: {
+  label: string;
+  script?: string;
+  compact?: boolean;
+}) {
+  const text = script?.trim();
+  if (!text) return null;
+
+  return (
+    <details className="rounded-lg border border-gray-200 bg-gray-50">
+      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+        {label}
+      </summary>
+      <pre className={clsx(
+        "border-t border-gray-200 px-3 py-3 whitespace-pre-wrap font-sans text-gray-700",
+        compact ? "text-xs" : "text-sm",
+      )}>
+        {text}
+      </pre>
+    </details>
+  );
+}
+
 // A slot reference used for picker + regen
 interface SlotRef {
   slot_type: "image_option" | "interaction_item";
@@ -707,15 +734,13 @@ export default function ReviewPage() {
 
                 {/* Script com marcadores */}
                 <div className="mb-2">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Roteiro (com marcadores pedagógicos)</p>
-                  <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans bg-gray-50 rounded-lg p-3 leading-relaxed">{a.script}</pre>
+                  <NarrationTextDetails label="Ver texto da locução" script={a.script} />
                 </div>
 
                 {/* TTS script se diferente do script */}
                 {a.tts_script && a.tts_script !== a.script && (
                   <div>
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Enviado ao TTS (sem marcadores)</p>
-                    <pre className="text-xs text-gray-500 whitespace-pre-wrap font-sans bg-gray-50 rounded-lg p-2">{a.tts_script}</pre>
+                    <NarrationTextDetails label="Ver texto enviado ao TTS" script={a.tts_script} compact />
                   </div>
                 )}
               </div>
@@ -785,7 +810,7 @@ export default function ReviewPage() {
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 flex items-start gap-3">
                 <div>
                   <p className="text-xs text-blue-500 font-medium mb-1">Áudio — {previewAudio.voice_style}</p>
-                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{previewAudio.script}</pre>
+                  <NarrationTextDetails label="Ver texto da locução" script={previewAudio.script} />
                 </div>
               </div>
             )}
