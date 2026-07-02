@@ -1,3 +1,11 @@
+# Generated images (saved by gpt-image-1, served at /static/images/)
+apps/api/static/images/*.png
+apps/api/static/images/*.jpg
+apps/api/static/images/*.jpeg
+!apps/api/static/images/.gitkeep
+apps/api/static/audio/*.mp3
+!apps/api/static/audio/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]
@@ -43,3 +51,6 @@ apps/web/public/generated/
 *.jpeg
 *.gif
 *.webp
+
+# Local agent/browser verification artifacts
+.codex-screenshots/

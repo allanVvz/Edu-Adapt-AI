@@ -1,7 +1,7 @@
-.PHONY: test test-api test-web test-images cc lint pre-deploy up down logs
+.PHONY: test test-api test-web test-images test-images-e2e test-profiles test-web-health test-audio test-audio-e2e test-emoji test-pdf cc lint pre-deploy up down logs
 
 # ─── Tests ─────────────────────────────────────────────────────────────────
-test: cc test-api test-web
+test: cc test-api test-web test-web-health
 	@echo "\nAll checks passed."
 
 test-api:
@@ -9,12 +9,66 @@ test-api:
 	docker compose exec -T api python -m pytest tests/ -v --tb=short -q
 
 test-web:
-	@echo "=== Frontend Tests ==="
+	@echo "=== Frontend Tests (Jest) ==="
 	docker compose exec -T web npm test -- --passWithNoTests --watchAll=false
 
 test-images:
-	@echo "=== Image Generation Tests (mock DALL-E) ==="
-	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short
+	@echo "=== Image Generation Tests (mocked) ==="
+	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short -k "not e2e"
+
+test-profiles:
+	@echo "=== Profile Image Modifier Tests (unit, no API needed) ==="
+	docker compose exec -T api python -m pytest tests/test_image_generation.py -v --tb=short -k "profile"
+
+test-audio:
+	@echo "=== Audio Generation Tests (mocked TTS) ==="
+	docker compose exec -T api python -m pytest tests/test_audio_generation.py -v --tb=short -k "not e2e"
+
+test-audio-e2e:
+	@echo "=== E2E Audio Generation (real OpenAI TTS — requires OPENAI_TEST_API_KEY) ==="
+	@if [ -z "$(OPENAI_TEST_API_KEY)" ]; then \
+		echo "SKIP: export OPENAI_TEST_API_KEY=sk-... to run this test"; \
+	else \
+		OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) docker compose exec -T \
+		  -e OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) api \
+		  python -m pytest tests/test_audio_generation.py::test_e2e_generate_real_audio_file -v --tb=short; \
+	fi
+
+test-emoji:
+	@echo "=== Emoji Illustration Tests ==="
+	docker compose exec -T api python -m pytest tests/test_emoji_illustration.py -v --tb=short
+
+test-pdf:
+	@echo "=== PDF Generation Tests (no OpenAI, no network) ==="
+	docker compose exec -T api python -m pytest tests/test_pdf_generation.py -v --tb=short
+
+test-images-e2e:
+	@echo "=== E2E Image Generation (real OpenAI API — requires OPENAI_TEST_API_KEY) ==="
+	@if [ -z "$(OPENAI_TEST_API_KEY)" ]; then \
+		echo "SKIP: export OPENAI_TEST_API_KEY=sk-... to run this test"; \
+	else \
+		OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) docker compose exec -T \
+		  -e OPENAI_TEST_API_KEY=$(OPENAI_TEST_API_KEY) api \
+		  python -m pytest tests/test_image_generation.py::test_e2e_generate_4_images_real_api -v --tb=short; \
+	fi
+
+test-web-health:
+	@echo "=== Frontend HTTP Health Check ==="
+	@attempt=1; \
+	while [ $$attempt -le 12 ]; do \
+		STATUS=$$(docker compose exec -T web node -e \
+		  "require('http').get('http://localhost:3000',r=>{process.stdout.write(String(r.statusCode));process.exit(0)}).on('error',()=>process.exit(1))" 2>/dev/null); \
+		if [ "$$STATUS" = "200" ]; then \
+			echo "Frontend OK — HTTP 200 at localhost:3000"; \
+			exit 0; \
+		fi; \
+		echo "  Not ready (attempt $$attempt/12) — waiting 5s..."; \
+		attempt=$$((attempt+1)); \
+		sleep 5; \
+	done; \
+	echo "FAIL: Frontend did not respond with 200 after 60s"; \
+	docker compose logs web --tail=20; \
+	exit 1
 
 cc:
 	@echo "=== Cyclomatic Complexity ==="
@@ -26,6 +80,9 @@ lint:
 # Run tests outside Docker (requires local envs)
 test-local-api:
 	cd apps/api && python -m pytest tests/ -v --tb=short
+
+test-local-pdf:
+	cd apps/api && python -m pytest tests/test_pdf_generation.py -v --tb=short
 
 test-local-web:
 	cd apps/web && npm test -- --passWithNoTests --watchAll=false

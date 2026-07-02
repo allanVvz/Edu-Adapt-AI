@@ -1,14 +1,21 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from ..database import get_session
 from ..models.adaptation import ActivityAdaptation
 from ..models.activity import Activity
+from ..models.story import Story
 from ..models.student import Student
+from ..models.student_profile import StudentProfile
 from ..models.attempt import StudentActivityAttempt
 from ..routes.auth import get_session_user
+from ..routes.stories import serialize_story_detail, serialize_story_summary
+from ..services.static_url_service import normalized_output_data
+from ..services.pdf_service import AdaptationPDFRenderer, build_combined_pdf
+from ..services.pdf_constants import get_profile_config
 import uuid
 
 router = APIRouter(prefix="/student", tags=["student"])
@@ -27,10 +34,10 @@ def _get_student(session: Session, user_id: str) -> Student:
 
 
 def _can_access(adaptation: ActivityAdaptation, student: Student) -> bool:
-    """True if student has direct assignment or matching profile."""
+    """True if student's profile matches the adaptation's profile."""
     if adaptation.student_id == student.id:
         return True
-    if adaptation.student_id is None and student.profile_id and adaptation.student_profile_id == student.profile_id:
+    if student.profile_id and adaptation.student_profile_id == student.profile_id:
         return True
     return False
 
@@ -39,8 +46,39 @@ def _get_item_label(item: object) -> str:
     if isinstance(item, str):
         return item
     if isinstance(item, dict):
-        return item.get("name", str(item))
+        return item.get("name") or item.get("description") or str(item)
     return str(item)
+
+
+def _story_pdf_data(story: Story | None) -> dict | None:
+    if not story:
+        return None
+    return {
+        "id": story.id,
+        "title": story.title,
+        "content": story.content,
+        "image_options": story.image_options or [],
+        "audio_options": story.audio_options or [],
+    }
+
+
+def _activity_math_context(activity: Activity | None) -> dict:
+    if not activity:
+        return {}
+    return {
+        "title": activity.title,
+        "discipline": activity.discipline,
+        "statement": activity.statement,
+        "question": activity.question,
+        "expected_answer": activity.expected_answer,
+        "teacher_notes": activity.teacher_notes,
+    }
+
+
+def _percent(score: float | None, max_score: float | None) -> int | None:
+    if score is None or max_score in (None, 0):
+        return None
+    return round((score / max_score) * 100)
 
 
 def _calculate_score(adaptation_output: dict, response: dict) -> tuple[float, float]:
@@ -86,44 +124,163 @@ def list_student_activities(
 
     student = _get_student(session, current_user.id)
 
-    # Direct assignments
-    direct = session.exec(
+    adaptations = []
+    if student.profile_id:
+        adaptations = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == student.profile_id,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+
+    direct_adaptations = session.exec(
         select(ActivityAdaptation).where(
             ActivityAdaptation.student_id == student.id,
             ActivityAdaptation.status == "published",
         )
     ).all()
+    by_id = {a.id: a for a in adaptations}
+    for a in direct_adaptations:
+        by_id[a.id] = a
+    adaptations = sorted(by_id.values(), key=lambda a: a.created_at, reverse=True)
 
-    # Profile-based (student_id not set, but profile matches)
-    profile_based = []
-    if student.profile_id:
-        profile_based = session.exec(
-            select(ActivityAdaptation).where(
-                ActivityAdaptation.student_profile_id == student.profile_id,
-                ActivityAdaptation.student_id == None,
-                ActivityAdaptation.status == "published",
-            )
-        ).all()
-
-    seen = {a.id for a in direct}
-    adaptations = direct + [a for a in profile_based if a.id not in seen]
+    completed_attempts = session.exec(
+        select(StudentActivityAttempt).where(
+            StudentActivityAttempt.student_id == student.id,
+            StudentActivityAttempt.status == "completed",
+        )
+    ).all()
+    attempts_by_adaptation: dict[str, StudentActivityAttempt] = {}
+    for attempt in sorted(completed_attempts, key=lambda a: a.finished_at or a.created_at, reverse=True):
+        if attempt.adaptation_id not in attempts_by_adaptation:
+            attempts_by_adaptation[attempt.adaptation_id] = attempt
 
     result = []
     for a in adaptations:
         activity = session.get(Activity, a.activity_id)
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+        attempt = attempts_by_adaptation.get(a.id)
         result.append({
             "id": a.id,
             "activity_id": a.activity_id,
             "title": activity.title if activity else None,
+            "discipline": activity.discipline if activity else None,
+            "story": serialize_story_summary(story),
             "status": a.status,
             "created_at": a.created_at,
+            "completed_at": attempt.finished_at if attempt else None,
+            "score": attempt.score if attempt else None,
+            "max_score": attempt.max_score if attempt else None,
+            "percentage": _percent(attempt.score, attempt.max_score) if attempt else None,
+            "has_result": attempt is not None,
         })
     return result
+
+
+@router.get("/results")
+def list_student_results(
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+    attempts = session.exec(
+        select(StudentActivityAttempt).where(
+            StudentActivityAttempt.student_id == student.id,
+            StudentActivityAttempt.status == "completed",
+        ).order_by(StudentActivityAttempt.finished_at.desc(), StudentActivityAttempt.created_at.desc())
+    ).all()
+
+    result = []
+    for attempt in attempts:
+        activity = session.get(Activity, attempt.activity_id)
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+        result.append({
+            "id": attempt.id,
+            "adaptation_id": attempt.adaptation_id,
+            "activity_id": attempt.activity_id,
+            "title": activity.title if activity else None,
+            "discipline": activity.discipline if activity else None,
+            "story": serialize_story_summary(story),
+            "score": attempt.score,
+            "max_score": attempt.max_score,
+            "percentage": _percent(attempt.score, attempt.max_score),
+            "status": attempt.status,
+            "finished_at": attempt.finished_at,
+            "created_at": attempt.created_at,
+            "completion_time_seconds": attempt.completion_time_seconds,
+        })
+    return result
+
+
+@router.get("/activities/export-all-pdf")
+def export_all_activities_pdf(
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    """Generate a multi-page PDF with all published activities for the student."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+
+    profile_name: Optional[str] = None
+    if student.profile_id:
+        profile = session.get(StudentProfile, student.profile_id)
+        profile_name = profile.name if profile else None
+
+    if student.profile_id:
+        rows = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == student.profile_id,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+    else:
+        rows = session.exec(
+            select(ActivityAdaptation).where(
+                ActivityAdaptation.student_profile_id == None,
+                ActivityAdaptation.status == "published",
+            )
+        ).all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No published activities found for this student")
+
+    cfg = get_profile_config(profile_name)
+    renderers = []
+    for adaptation in rows:
+        if not adaptation.output_data:
+            continue
+        activity = session.get(Activity, adaptation.activity_id)
+        title = activity.title if activity else "Atividade"
+        discipline = activity.discipline if activity else None
+        story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+        renderers.append(AdaptationPDFRenderer(
+            output_data=normalized_output_data(adaptation.output_data, activity=_activity_math_context(activity)),
+            activity_title=title,
+            config=cfg,
+            discipline=discipline,
+            story_data=_story_pdf_data(story),
+        ))
+
+    if not renderers:
+        raise HTTPException(status_code=404, detail="No activities with generated content found")
+
+    pdf_bytes = build_combined_pdf(renderers)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="minhas_atividades.pdf"'},
+    )
 
 
 @router.get("/activities/{adaptation_id}")
 def get_student_activity(
     adaptation_id: str,
+    request: Request,
     current_user=Depends(get_session_user),
     session: Session = Depends(get_session),
 ):
@@ -136,11 +293,19 @@ def get_student_activity(
         raise HTTPException(status_code=404, detail="Activity not found or not published")
 
     activity = session.get(Activity, adaptation.activity_id)
+    story = session.get(Story, activity.story_id) if activity and activity.story_id else None
     return {
         "id": adaptation.id,
         "activity_id": adaptation.activity_id,
         "title": activity.title if activity else None,
-        "output": adaptation.output_data,
+        "discipline": activity.discipline if activity else None,
+        "story_summary": serialize_story_summary(story),
+        "story": serialize_story_detail(story, str(request.base_url).rstrip("/")),
+        "output": normalized_output_data(
+            adaptation.output_data,
+            str(request.base_url).rstrip("/"),
+            activity=_activity_math_context(activity),
+        ),
     }
 
 
@@ -222,3 +387,47 @@ def submit_activity(
 
     session.commit()
     return {"score": score, "max_score": max_score, "percentage": round((score / max_score) * 100)}
+
+
+@router.get("/activities/{adaptation_id}/pdf")
+def download_student_activity_pdf(
+    adaptation_id: str,
+    current_user=Depends(get_session_user),
+    session: Session = Depends(get_session),
+):
+    """Generate and download the PDF version of a published activity the student has access to."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can access this endpoint")
+
+    student = _get_student(session, current_user.id)
+    adaptation = session.get(ActivityAdaptation, adaptation_id)
+    if not adaptation or adaptation.status != "published" or not _can_access(adaptation, student):
+        raise HTTPException(status_code=404, detail="Activity not found or not published")
+    if not adaptation.output_data:
+        raise HTTPException(status_code=422, detail="Activity has no generated content yet")
+
+    activity = session.get(Activity, adaptation.activity_id)
+    title = activity.title if activity else "Atividade"
+    discipline = activity.discipline if activity else None
+    story = session.get(Story, activity.story_id) if activity and activity.story_id else None
+
+    profile_name: Optional[str] = None
+    if adaptation.student_profile_id:
+        profile = session.get(StudentProfile, adaptation.student_profile_id)
+        profile_name = profile.name if profile else None
+
+    cfg = get_profile_config(profile_name)
+    pdf_bytes = AdaptationPDFRenderer(
+        output_data=normalized_output_data(adaptation.output_data, activity=_activity_math_context(activity)),
+        activity_title=title,
+        config=cfg,
+        discipline=discipline,
+        story_data=_story_pdf_data(story),
+    ).render()
+
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)[:60]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
+    )

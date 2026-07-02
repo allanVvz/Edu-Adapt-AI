@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import AdminLayout from "@/components/layout/AdminLayout";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { Trash2, Plus, Key } from "lucide-react";
+import { Trash2, Plus, Key, Loader2, ImageIcon, CheckCircle, XCircle } from "lucide-react";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI API Key", required: true, hint: "Necessária para gerar adaptações com IA." },
@@ -25,6 +25,8 @@ export default function ApiKeysPage() {
   const [form, setForm] = useState({ provider: "openai", key_name: "Minha chave OpenAI", value: "" });
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; hint?: string; url?: string }>>({});
 
   useEffect(() => { load(); }, []);
 
@@ -56,6 +58,24 @@ export default function ApiKeysPage() {
     await api.delete(`/settings/api-keys/${id}`);
     toast.success("Chave removida.");
     load();
+  }
+
+  async function testImageGeneration(id: string) {
+    setTestingId(id);
+    setTestResults((r) => ({ ...r, [id]: { ok: false } }));
+    try {
+      const { data } = await api.post(`/settings/api-keys/${id}/test-images`);
+      setTestResults((r) => ({ ...r, [id]: data }));
+      if (data.ok) {
+        toast.success(`Imagem gerada com sucesso! Modelo: ${data.model}`);
+      } else {
+        toast.error(data.hint || data.error || "Falha na geração de imagem", { duration: 10000 });
+      }
+    } catch {
+      toast.error("Erro ao testar chave.");
+    } finally {
+      setTestingId(null);
+    }
   }
 
   const hasOpenAI = keys.some((k) => k.provider === "openai" && k.status === "active");
@@ -135,22 +155,55 @@ export default function ApiKeysPage() {
             <p className="text-sm text-gray-400 p-5">Nenhuma chave cadastrada.</p>
           ) : (
             <div className="divide-y divide-gray-50">
-              {keys.map((k) => (
-                <div key={k.id} className="px-5 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{k.key_name}</p>
-                    <p className="text-xs text-gray-400">{PROVIDERS.find((p) => p.id === k.provider)?.label || k.provider}</p>
+              {keys.map((k) => {
+                const result = testResults[k.id];
+                return (
+                  <div key={k.id} className="px-5 py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{k.key_name}</p>
+                        <p className="text-xs text-gray-400">{PROVIDERS.find((p) => p.id === k.provider)?.label || k.provider}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {k.provider === "openai" && k.status === "active" && (
+                          <button
+                            onClick={() => testImageGeneration(k.id)}
+                            disabled={testingId === k.id}
+                            className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 border border-purple-200 hover:border-purple-400 rounded-lg px-2 py-1 disabled:opacity-50 transition-colors"
+                          >
+                            {testingId === k.id
+                              ? <Loader2 size={11} className="animate-spin" />
+                              : result?.ok === true
+                                ? <CheckCircle size={11} />
+                                : result?.ok === false && testingId !== k.id
+                                  ? <XCircle size={11} className="text-red-500" />
+                                  : <ImageIcon size={11} />
+                            }
+                            Testar imagem
+                          </button>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${k.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                          {k.status === "active" ? "Ativa" : "Inativa"}
+                        </span>
+                        <button onClick={() => handleDelete(k.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {result && !result.ok && result.hint && (
+                      <div className="mt-2 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
+                        <strong>Problema detectado:</strong> {result.hint}
+                      </div>
+                    )}
+                    {result?.ok && result.url && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-green-700">
+                        <CheckCircle size={12} />
+                        Imagem gerada com sucesso — chave tem acesso ao modelo de imagem.
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${k.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                      {k.status === "active" ? "Ativa" : "Inativa"}
-                    </span>
-                    <button onClick={() => handleDelete(k.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

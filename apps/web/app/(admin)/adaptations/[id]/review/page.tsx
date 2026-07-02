@@ -2,20 +2,22 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AdminLayout from "@/components/layout/AdminLayout";
+import ImagePickerModal from "@/components/ImagePickerModal";
 import { getUser } from "@/lib/auth";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
 import {
-  CheckCircle, XCircle, RefreshCw, Send, UserCheck,
-  ChevronDown, Loader2, Play, ImageIcon,
+  CheckCircle, XCircle, RefreshCw, Send,
+  Loader2, Play, ImageIcon, Images, RotateCcw, Volume2, Music2,
 } from "lucide-react";
 import clsx from "clsx";
 
 const TABS = ["Texto", "Visual", "Imagens", "Áudio", "Interação", "Impressão", "Executar", "Validação"] as const;
 type Tab = (typeof TABS)[number];
-type ImageStyle = "line_art" | "cartoon_2d";
+type ImageStyle = "pictogram" | "line_art" | "cartoon_2d";
 
 const STYLE_LABELS: Record<ImageStyle, string> = {
+  pictogram: "Pictograma",
   line_art: "Desenho P&B — traços simples",
   cartoon_2d: "Cartoon colorido — detalhes 2D",
 };
@@ -27,17 +29,41 @@ const label = (v: ActivityItem | ActivityZone): string => {
   return v.name || (v as Record<string, string>).description || "";
 };
 
+const errorText = (err: unknown): string => {
+  if (!err) return "Erro desconhecido.";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const obj = err as { error?: unknown; detail?: unknown; message?: unknown };
+    return errorText(obj.error ?? obj.detail ?? obj.message ?? JSON.stringify(err));
+  }
+  return String(err);
+};
+
 interface ImageOption {
   id: string;
   description: string;
   base_subject?: string;
-  prompts?: Record<ImageStyle, string>;
-  generated?: Record<ImageStyle, { image_url: string | null; generated_at?: string | null }>;
+  prompts?: Partial<Record<ImageStyle, string>>;
+  generated?: Partial<Record<ImageStyle, { image_url: string | null; generated_at?: string | null; symbol?: string | null }>>;
   active_style?: ImageStyle;
   is_active?: boolean;
   image_url?: string | null;
-  // legacy
   prompt?: string;
+  illustration_type?: "emoji" | "pictogram" | "symbol" | "generated";
+  emoji?: string;
+  symbol?: string;
+}
+
+interface AudioOption {
+  id?: string;
+  script: string;
+  tts_script?: string;
+  voice_style?: string;
+  voice?: string;
+  rhythm?: number;
+  pitch?: string;
+  audio_url?: string | null;
+  source?: string;
 }
 
 interface AdaptationData {
@@ -54,8 +80,39 @@ interface AdaptationData {
   teacher_feedback: string | null;
 }
 
-interface StudentItem { id: string; name: string; email: string }
-interface TeacherItem { id: string; name: string; email: string; role: string }
+function NarrationTextDetails({
+  label,
+  script,
+  compact = false,
+}: {
+  label: string;
+  script?: string;
+  compact?: boolean;
+}) {
+  const text = script?.trim();
+  if (!text) return null;
+
+  return (
+    <details className="rounded-lg border border-gray-200 bg-gray-50">
+      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+        {label}
+      </summary>
+      <pre className={clsx(
+        "border-t border-gray-200 px-3 py-3 whitespace-pre-wrap font-sans text-gray-700",
+        compact ? "text-xs" : "text-sm",
+      )}>
+        {text}
+      </pre>
+    </details>
+  );
+}
+
+// A slot reference used for picker + regen
+interface SlotRef {
+  slot_type: "image_option" | "interaction_item";
+  slot_id: string;
+  current_url?: string | null;
+}
 
 export default function ReviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -66,43 +123,37 @@ export default function ReviewPage() {
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Image management state
-  const [activeStyle, setActiveStyle] = useState<ImageStyle>("cartoon_2d");
-  const [activeImageIds, setActiveImageIds] = useState<Set<string>>(new Set());
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  // Image management
+  const [activeStyle, setActiveStyle] = useState<ImageStyle>("pictogram");
+  const [generatingStyle, setGeneratingStyle] = useState<ImageStyle | null>(null);
   const [applyingStyle, setApplyingStyle] = useState(false);
 
-  // Assignment state
-  const [students, setStudents] = useState<StudentItem[]>([]);
-  const [teachers, setTeachers] = useState<TeacherItem[]>([]);
-  const [assignStudentId, setAssignStudentId] = useState("");
-  const [assignTeacherId, setAssignTeacherId] = useState("");
-  const [savingAssign, setSavingAssign] = useState(false);
+  // Gallery picker
+  const [pickerSlot, setPickerSlot] = useState<SlotRef | null>(null);
+  const [applyingPick, setApplyingPick] = useState(false);
+
+  // Per-image regeneration
+  const [regenSlot, setRegenSlot] = useState<SlotRef | null>(null);
+  const [regenFeedback, setRegenFeedback] = useState("");
+  const [regenerating, setRegenerating] = useState(false);
+
+  // Audio generation
+  const [generatingAudio, setGeneratingAudio] = useState(false);
+
 
   const [previewAnswers, setPreviewAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const user = getUser();
-    const admin = user?.role === "admin";
-    setIsAdmin(admin);
+    setIsAdmin(user?.role === "admin");
     load();
-    if (admin) {
-      api.get("/students").then((r) => setStudents(r.data)).catch(() => {});
-      api.get("/admin/users").then((r) =>
-        setTeachers((r.data as TeacherItem[]).filter((u) => u.role === "teacher" || u.role === "admin"))
-      ).catch(() => {});
-    }
   }, [id]);
 
   async function load() {
     try {
       const { data: d } = await api.get(`/adaptations/${id}`);
       setData(d);
-      setAssignStudentId(d.student_id || "");
-      setAssignTeacherId(d.activity?.teacher_id || "");
-      // Initialize image state from loaded data
       const imgs = (d.output?.image_options as ImageOption[]) || [];
-      setActiveImageIds(new Set(imgs.filter((i) => i.is_active).map((i) => i.id)));
       const firstStyle = imgs[0]?.active_style;
       if (firstStyle) setActiveStyle(firstStyle);
     } catch {
@@ -137,22 +188,23 @@ export default function ReviewPage() {
     }
   }
 
-  async function generateImageForStyle(imageId: string) {
-    setGeneratingId(imageId);
+  async function generateImagesForStyle(style: ImageStyle) {
+    setGeneratingStyle(style);
     try {
-      const result = await api.post(`/adaptations/${id}/generate-images`, { style: activeStyle });
+      const result = await api.post(`/adaptations/${id}/generate-images`, { style });
       const errs = result.data?.errors ?? [];
       if (errs.length > 0) {
-        toast.error(`Alguns erros: ${errs.map((e: { error: string }) => e.error).join(", ")}`);
+        const first = errs[0] as { error: string };
+        toast.error(first.error, { duration: 10000 });
       } else {
-        toast.success("Imagem gerada!");
+        toast.success(`Imagens ${STYLE_LABELS[style]} geradas e salvas na galeria!`);
       }
       load();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      toast.error(msg || "Erro ao gerar imagem. Verifique sua chave OpenAI.");
+      toast.error(msg || "Erro ao gerar imagens. Verifique sua chave OpenAI.");
     } finally {
-      setGeneratingId(null);
+      setGeneratingStyle(null);
     }
   }
 
@@ -161,9 +213,9 @@ export default function ReviewPage() {
     try {
       await api.post(`/adaptations/${id}/image-style`, {
         style: activeStyle,
-        active_image_ids: [...activeImageIds],
+        active_image_ids: imageOptions.map((img) => img.id),
       });
-      toast.success("Estilo e seleção aplicados!");
+      toast.success(`Estilo "${STYLE_LABELS[activeStyle]}" aplicado!`);
       load();
     } catch {
       toast.error("Erro ao aplicar estilo.");
@@ -172,26 +224,72 @@ export default function ReviewPage() {
     }
   }
 
-  async function saveAssignment(andPublish = false) {
-    setSavingAssign(true);
+  async function handlePickerSelect(imageUrl: string, _galleryImageId: string, style: ImageStyle | null) {
+    if (!pickerSlot) return;
+    setApplyingPick(true);
     try {
-      await api.put(`/admin/adaptations/${id}/assign`, {
-        student_id: assignStudentId || null,
-        teacher_id: assignTeacherId || null,
+      await api.post(`/adaptations/${id}/apply-gallery-image`, {
+        slot_type: pickerSlot.slot_type,
+        slot_id: pickerSlot.slot_id,
+        image_url: imageUrl,
+        gallery_image_id: _galleryImageId,
+        style: style ?? activeStyle,
       });
-      if (andPublish) {
-        await api.post(`/adaptations/${id}/publish`);
-        toast.success("Atribuições salvas e adaptação publicada!");
-      } else {
-        toast.success("Atribuições salvas.");
-      }
+      toast.success("Imagem substituída com sucesso!");
       load();
     } catch {
-      toast.error("Erro ao salvar atribuições.");
+      toast.error("Erro ao substituir imagem.");
     } finally {
-      setSavingAssign(false);
+      setApplyingPick(false);
+      setPickerSlot(null);
     }
   }
+
+  async function generateAudio(force = false) {
+    setGeneratingAudio(true);
+    try {
+      const result = await api.post(`/adaptations/${id}/generate-audio${force ? "?force=true" : ""}`);
+      const { generated, errors } = result.data as { generated: number; errors: unknown[] };
+      if (errors && errors.length > 0) {
+        toast.error(`Erro ao gerar áudio: ${errorText(errors[0])}`, { duration: 10000 });
+      } else if (generated === 0) {
+        toast("Áudio já gerado. Use Regenerar para sobrescrever.", { icon: "ℹ️" });
+      } else {
+        toast.success(`${generated} áudio(s) gerado(s)!`);
+      }
+      load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Erro ao gerar áudio. Verifique sua chave OpenAI.");
+    } finally {
+      setGeneratingAudio(false);
+    }
+  }
+
+  async function handleRegenerate() {
+    if (!regenSlot) return;
+    setRegenerating(true);
+    const styleToGenerate: ImageStyle = activeStyle === "pictogram" ? "cartoon_2d" : activeStyle;
+    try {
+      await api.post(`/adaptations/${id}/regenerate-image`, {
+        slot_type: regenSlot.slot_type,
+        slot_id: regenSlot.slot_id,
+        style: styleToGenerate,
+        feedback: regenFeedback,
+      });
+      setActiveStyle(styleToGenerate);
+      toast.success("Nova imagem gerada e salva na galeria!");
+      setRegenSlot(null);
+      setRegenFeedback("");
+      load();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg || "Erro ao regenerar imagem.");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
 
   if (!data) return (
     <AdminLayout>
@@ -204,7 +302,7 @@ export default function ReviewPage() {
   const output = data.output || {};
   const textAdaptations = (output.text_adaptations as Array<{ version: number; content: string }>) || [];
   const imageOptions = (output.image_options as ImageOption[]) || [];
-  const audioOptions = (output.audio_options as Array<{ id?: string; script: string; voice_style: string }>) || [];
+  const audioOptions = (output.audio_options as AudioOption[]) || [];
   const interactionOptions = (output.interaction_options as Array<{
     type: string; instructions: string;
     items: ActivityItem[]; zones: ActivityZone[];
@@ -220,16 +318,116 @@ export default function ReviewPage() {
   const previewText = textAdaptations[0]?.content;
   const previewAudio = audioOptions[0];
 
-  // Interaction items (for image generation list)
   const interactionItems = interactionOptions.flatMap((io) =>
-    (io.items || []).filter((it) => typeof it !== "string" && (it as ImageOption).name)
+    (io.items || []).filter((it) => typeof it !== "string" && (it as unknown as { name?: string }).name)
       .map((it) => it as unknown as ImageOption & { name: string })
   );
 
-  const visualImages = imageOptions.filter((img) => img.is_active && img.image_url);
+  const visualImages = imageOptions.filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
+
+  // Helper: renders image card with click-to-pick and regen controls
+  function ImageCard({
+    slotType, slotId, imageUrl, title, isSmall = false,
+  }: {
+    slotType: "image_option" | "interaction_item";
+    slotId: string;
+    imageUrl: string | null | undefined;
+    title: string;
+    isSmall?: boolean;
+  }) {
+    const isRegen = regenSlot?.slot_type === slotType && regenSlot?.slot_id === slotId;
+    return (
+      <div className="border border-gray-200 rounded-xl p-3 bg-white">
+        {/* Thumbnail — click to open gallery picker */}
+        <div
+          className={clsx(
+            "w-full rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2 cursor-pointer group relative",
+            isSmall ? "h-20" : "aspect-square"
+          )}
+          onClick={() => setPickerSlot({ slot_type: slotType, slot_id: slotId, current_url: imageUrl })}
+          title="Clique para escolher outra imagem da galeria"
+        >
+          {imageUrl ? (
+            <>
+              <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded-lg px-2 py-1 flex items-center gap-1 text-xs text-gray-700 font-medium">
+                  <Images size={11} /> Trocar
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center text-gray-300 group-hover:text-blue-400 transition-colors">
+              <ImageIcon size={isSmall ? 20 : 28} className="mx-auto" />
+              <p className="text-xs mt-1">Escolher</p>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs font-medium text-gray-700 text-center">{title}</p>
+        {imageUrl && <p className="text-xs text-green-600 text-center mt-0.5">✓ Gerado</p>}
+
+        {/* Regen toggle */}
+        {!isRegen ? (
+          <button
+            onClick={() => { setRegenSlot({ slot_type: slotType, slot_id: slotId }); setRegenFeedback(""); }}
+            className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-gray-500 hover:text-purple-600 border border-gray-200 hover:border-purple-300 rounded-lg py-1 transition-colors"
+          >
+            <RotateCcw size={10} /> Refazer
+          </button>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <textarea
+              value={regenFeedback}
+              onChange={(e) => setRegenFeedback(e.target.value)}
+              rows={2}
+              placeholder="Ex: peixe visto de longe, ângulo distante, peixe menor na água..."
+              className="w-full text-xs border border-purple-300 rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-1 focus:ring-purple-400"
+              autoFocus
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={handleRegenerate}
+                disabled={regenerating}
+                className="flex-1 flex items-center justify-center gap-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg py-1.5 font-medium"
+              >
+                {regenerating ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
+                {regenerating ? "Gerando..." : "Regenerar"}
+              </button>
+              <button
+                onClick={() => setRegenSlot(null)}
+                className="text-xs text-gray-400 hover:text-gray-600 px-2 border border-gray-200 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <AdminLayout>
+      {/* Gallery picker modal */}
+      <ImagePickerModal
+        open={!!pickerSlot}
+        onClose={() => setPickerSlot(null)}
+        onSelect={handlePickerSelect}
+        currentImageUrl={pickerSlot?.current_url}
+        initialStyle={activeStyle}
+      />
+
+      {/* Applying overlay */}
+      {applyingPick && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20">
+          <div className="bg-white rounded-xl px-6 py-4 shadow-lg flex items-center gap-3">
+            <Loader2 size={18} className="animate-spin text-blue-600" />
+            <p className="text-sm font-medium">Substituindo imagem...</p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
@@ -244,13 +442,6 @@ export default function ReviewPage() {
               <span className="text-xs bg-orange-50 text-orange-600 border border-orange-100 rounded-full px-2 py-0.5">
                 Prof. {data.activity.teacher_name}
               </span>
-            )}
-            {data.student_name ? (
-              <span className="text-xs bg-green-50 text-green-700 border border-green-100 rounded-full px-2 py-0.5">
-                Aluno: {data.student_name}
-              </span>
-            ) : (
-              <span className="text-xs bg-gray-100 text-gray-400 rounded-full px-2 py-0.5">Sem aluno atribuído</span>
             )}
             <span className={clsx("text-xs rounded-full px-2 py-0.5 font-medium", {
               "bg-yellow-100 text-yellow-700": data.status === "review",
@@ -325,19 +516,25 @@ export default function ReviewPage() {
             {visualImages.length === 0 ? (
               <div className="text-center py-10 text-gray-400 text-sm">
                 <ImageIcon size={32} className="mx-auto mb-2 opacity-30" />
-                <p>Nenhuma imagem ativa. Gere imagens na aba "Imagens" e marque-as como ativas.</p>
+                <p>Nenhuma imagem ativa. Gere imagens na aba "Imagens" e clique em "Aplicar".</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {visualImages.map((img) => (
                   <div key={img.id} className="text-center">
-                    <img
-                      src={img.image_url!}
-                      alt={img.description}
-                      className="w-full aspect-square object-cover rounded-xl border border-gray-100 shadow-sm"
-                    />
+                    {img.image_url ? (
+                      <img
+                        src={img.image_url}
+                        alt={img.description}
+                        className="w-full aspect-square object-cover rounded-xl border border-gray-100 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-full aspect-square rounded-xl border border-gray-100 shadow-sm bg-amber-50 flex items-center justify-center text-6xl">
+                        {img.emoji || img.symbol}
+                      </div>
+                    )}
                     <p className="text-xs text-gray-600 mt-2 font-medium">{img.description}</p>
-                    <p className="text-xs text-gray-400">{STYLE_LABELS[img.active_style ?? "cartoon_2d"]}</p>
+                    <p className="text-xs text-gray-400">{STYLE_LABELS[img.active_style ?? "pictogram"]}</p>
                   </div>
                 ))}
               </div>
@@ -347,13 +544,12 @@ export default function ReviewPage() {
 
         {tab === "Imagens" && (
           <div>
-            {/* Style selector */}
-            <div className="flex items-center gap-3 mb-5">
+            {/* Style selector + Gerar buttons */}
+            <div className="flex flex-wrap items-center gap-3 mb-5">
               <h2 className="font-semibold text-gray-700">Estilo:</h2>
-              <div className="flex gap-2">
-                {(Object.keys(STYLE_LABELS) as ImageStyle[]).map((style) => (
+              {(Object.keys(STYLE_LABELS) as ImageStyle[]).map((style) => (
+                <div key={style} className="flex items-center gap-2">
                   <button
-                    key={style}
                     onClick={() => setActiveStyle(style)}
                     className={clsx(
                       "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
@@ -364,7 +560,20 @@ export default function ReviewPage() {
                   >
                     {STYLE_LABELS[style]}
                   </button>
-                ))}
+                  <button
+                    onClick={() => generateImagesForStyle(style)}
+                    disabled={!!generatingStyle}
+                    className="flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 disabled:opacity-50 text-purple-700 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200"
+                  >
+                    {generatingStyle === style ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />}
+                    Gerar
+                  </button>
+                </div>
+              ))}
+              <div className="ml-auto">
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <Images size={11} /> Clique em uma imagem para trocar pela galeria
+                </p>
               </div>
             </div>
 
@@ -372,128 +581,84 @@ export default function ReviewPage() {
               <p className="text-gray-400 text-sm">Nenhuma imagem disponível. Regenere a adaptação.</p>
             ) : (
               <>
-                {/* Image options list */}
                 {imageOptions.length > 0 && (
                   <div className="mb-6">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Imagens da atividade</p>
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {imageOptions.map((img) => {
-                        const generatedEntry = img.generated?.[activeStyle];
-                        const hasGenerated = !!generatedEntry?.image_url;
-                        const isGenerating = generatingId === img.id;
-                        const prompt = img.prompts?.[activeStyle] || img.prompt || "";
-                        const isActive = activeImageIds.has(img.id);
-
-                        return (
-                          <div key={img.id}
-                            className={clsx(
-                              "flex gap-4 p-4 rounded-xl border-2 transition-colors",
-                              isActive ? "border-purple-200 bg-purple-50/30" : "border-gray-100 bg-gray-50/30"
-                            )}>
-                            {/* Checkbox */}
-                            <div className="flex items-start pt-1">
-                              <input
-                                type="checkbox"
-                                checked={isActive}
-                                onChange={(e) => {
-                                  const next = new Set(activeImageIds);
-                                  if (e.target.checked) next.add(img.id);
-                                  else next.delete(img.id);
-                                  setActiveImageIds(next);
-                                }}
-                                className="w-4 h-4 accent-purple-600 cursor-pointer"
-                              />
-                            </div>
-
-                            {/* Thumbnail */}
-                            <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center">
-                              {hasGenerated ? (
-                                <img src={generatedEntry!.image_url!} alt={img.description} className="w-full h-full object-cover" />
-                              ) : (
-                                <ImageIcon size={24} className="text-gray-300" />
-                              )}
-                            </div>
-
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm text-gray-800 mb-1">{img.description}</p>
-                              <p className="text-xs text-gray-400 font-mono truncate mb-2">{prompt}</p>
-                              {hasGenerated ? (
-                                <div className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
-                                  <CheckCircle size={12} />
-                                  Gerado — para regenerar, adicione feedback e reprocesse
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => generateImageForStyle(img.id)}
-                                  disabled={!!generatingId}
-                                  className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
-                                >
-                                  {isGenerating ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />}
-                                  Gerar {STYLE_LABELS[activeStyle]}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Interaction items */}
-                {interactionItems.length > 0 && (
-                  <div className="mb-5">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Itens da interação</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      {interactionItems.map((item) => {
-                        const generatedEntry = (item as unknown as ImageOption).generated?.[activeStyle];
-                        const hasGenerated = !!generatedEntry?.image_url;
-                        const isGenerating = generatingId === `item_${item.name}`;
-                        const prompt = (item as unknown as ImageOption).prompts?.[activeStyle] || (item as unknown as { image_prompt?: string }).image_prompt || "";
-
-                        return (
-                          <div key={item.name} className="border border-gray-200 rounded-xl p-3 bg-white">
-                            <div className="w-full h-20 rounded-lg overflow-hidden border border-gray-100 bg-gray-50 flex items-center justify-center mb-2">
-                              {hasGenerated ? (
-                                <img src={generatedEntry!.image_url!} alt={item.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <ImageIcon size={20} className="text-gray-300" />
-                              )}
-                            </div>
-                            <p className="text-xs font-medium text-gray-700 mb-1 text-center">{item.name}</p>
-                            {!hasGenerated && (
+                        if (img.illustration_type === "emoji" || img.illustration_type === "pictogram" || img.illustration_type === "symbol") {
+                          return (
+                            <div
+                              key={img.id}
+                              onClick={() => setPickerSlot({ slot_type: "image_option", slot_id: img.id, current_url: img.image_url })}
+                              className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center cursor-pointer hover:border-purple-300 transition-colors"
+                              title="Clique para trocar pela galeria"
+                            >
+                              <div className="text-5xl mb-2 select-none">{img.emoji || img.symbol}</div>
+                              <p className="text-xs font-medium text-gray-700">{img.description}</p>
+                              <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>
                               <button
-                                onClick={async () => {
-                                  setGeneratingId(`item_${item.name}`);
-                                  try {
-                                    await api.post(`/adaptations/${id}/generate-images`, { style: activeStyle });
-                                    toast.success("Imagens geradas!");
-                                    load();
-                                  } catch {
-                                    toast.error("Erro ao gerar. Verifique sua chave OpenAI.");
-                                  } finally {
-                                    setGeneratingId(null);
-                                  }
-                                }}
-                                disabled={!!generatingId}
-                                className="w-full flex items-center justify-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-medium py-1.5 rounded-lg disabled:opacity-50"
+                                onClick={(e) => { e.stopPropagation(); generateImagesForStyle(activeStyle); }}
+                                disabled={!!generatingStyle}
+                                className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-amber-700 hover:text-amber-900 border border-amber-300 hover:border-amber-500 rounded-lg py-1 transition-colors disabled:opacity-50"
                               >
-                                {isGenerating ? <Loader2 size={10} className="animate-spin" /> : <ImageIcon size={10} />}
-                                Gerar
+                                <ImageIcon size={10} /> Gerar IA mesmo assim
                               </button>
-                            )}
-                            {hasGenerated && (
-                              <p className="text-xs text-green-600 text-center font-medium">✓ Gerado</p>
-                            )}
-                          </div>
+                            </div>
+                          );
+                        }
+                        const generatedEntry = img.generated?.[activeStyle];
+                        const imageUrl = generatedEntry?.image_url || img.image_url || null;
+                        return (
+                          <ImageCard
+                            key={img.id}
+                            slotType="image_option"
+                            slotId={img.id}
+                            imageUrl={imageUrl}
+                            title={img.description}
+                          />
                         );
                       })}
                     </div>
                   </div>
                 )}
 
-                {/* Apply button */}
+                {interactionItems.length > 0 && (
+                  <div className="mb-6">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Itens da interação</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {interactionItems.map((item) => {
+                        if (item.illustration_type === "emoji" || item.illustration_type === "pictogram" || item.illustration_type === "symbol") {
+                          return (
+                            <div
+                              key={item.name}
+                              onClick={() => setPickerSlot({ slot_type: "interaction_item", slot_id: item.name, current_url: (item as unknown as ImageOption).image_url })}
+                              className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-center cursor-pointer hover:border-purple-300 transition-colors"
+                              title="Clique para trocar pela galeria"
+                            >
+                              <div className="text-4xl mb-2 select-none">{item.emoji || item.symbol}</div>
+                              <p className="text-xs font-medium text-gray-700">{item.name}</p>
+                              <p className="text-xs text-amber-600 mt-1">símbolo reutilizado</p>
+                            </div>
+                          );
+                        }
+                        const generatedEntry = (item as unknown as ImageOption).generated?.[activeStyle];
+                        const imageUrl = generatedEntry?.image_url || (item as unknown as ImageOption).image_url || null;
+                        return (
+                          <ImageCard
+                            key={item.name}
+                            slotType="interaction_item"
+                            slotId={item.name}
+                            imageUrl={imageUrl}
+                            title={item.name}
+                            isSmall
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="border-t border-gray-100 pt-4">
                   <button
                     onClick={applyImageStyle}
@@ -501,10 +666,10 @@ export default function ReviewPage() {
                     className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl"
                   >
                     {applyingStyle ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                    Aplicar estilo "{STYLE_LABELS[activeStyle]}" e seleção ativas
+                    Aplicar — {STYLE_LABELS[activeStyle]}
                   </button>
                   <p className="text-xs text-gray-400 mt-2">
-                    Atualiza as imagens visíveis ao aluno. Imagens marcadas (☑) aparecem na aba Visual.
+                    Aplica o estilo selecionado a todas as imagens e atualiza a visualização do aluno.
                   </p>
                 </div>
               </>
@@ -514,13 +679,70 @@ export default function ReviewPage() {
 
         {tab === "Áudio" && (
           <div>
-            <h2 className="font-semibold text-gray-700 mb-3">Roteiros de áudio</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-gray-700">Roteiros de áudio TTS</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => generateAudio(false)}
+                  disabled={generatingAudio}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+                >
+                  {generatingAudio ? <Loader2 size={12} className="animate-spin" /> : <Volume2 size={12} />}
+                  Gerar Áudio
+                </button>
+                <button
+                  onClick={() => generateAudio(true)}
+                  disabled={generatingAudio}
+                  className="flex items-center gap-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-xs font-medium px-3 py-1.5 rounded-lg"
+                >
+                  <RotateCcw size={12} />
+                  Regenerar
+                </button>
+              </div>
+            </div>
             {audioOptions.length === 0 ? (
-              <p className="text-gray-400 text-sm">Nenhum roteiro de áudio.</p>
+              <p className="text-gray-400 text-sm">Nenhum roteiro de áudio. Regenere a adaptação para criar roteiros.</p>
             ) : audioOptions.map((a, i) => (
-              <div key={a.id ?? i} className="bg-gray-50 rounded-lg p-4 mb-3">
-                <p className="text-xs text-gray-400 mb-1">Estilo: <span className="text-gray-600">{a.voice_style}</span></p>
-                <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans">{a.script}</pre>
+              <div key={a.id ?? i} className="border border-gray-200 rounded-xl p-4 mb-3 bg-white">
+                {/* Metadata row */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {a.voice && (
+                    <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 border border-purple-100 rounded-full px-2 py-0.5">
+                      <Music2 size={10} /> {a.voice}
+                    </span>
+                  )}
+                  {a.rhythm != null && (
+                    <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5">
+                      {a.rhythm}×
+                    </span>
+                  )}
+                  {a.voice_style && (
+                    <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{a.voice_style}</span>
+                  )}
+                  {a.audio_url && (
+                    <span className="text-xs bg-green-50 text-green-700 border border-green-100 rounded-full px-2 py-0.5">✓ Gerado</span>
+                  )}
+                </div>
+
+                {/* Audio player */}
+                {a.audio_url && (
+                  <div className="mb-3">
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                    <audio controls src={a.audio_url} className="w-full h-9 rounded-lg" />
+                  </div>
+                )}
+
+                {/* Script com marcadores */}
+                <div className="mb-2">
+                  <NarrationTextDetails label="Ver texto da locução" script={a.script} />
+                </div>
+
+                {/* TTS script se diferente do script */}
+                {a.tts_script && a.tts_script !== a.script && (
+                  <div>
+                    <NarrationTextDetails label="Ver texto enviado ao TTS" script={a.tts_script} compact />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -588,7 +810,7 @@ export default function ReviewPage() {
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 flex items-start gap-3">
                 <div>
                   <p className="text-xs text-blue-500 font-medium mb-1">Áudio — {previewAudio.voice_style}</p>
-                  <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{previewAudio.script}</pre>
+                  <NarrationTextDetails label="Ver texto da locução" script={previewAudio.script} />
                 </div>
               </div>
             )}
@@ -701,80 +923,6 @@ export default function ReviewPage() {
         />
       </div>
 
-      {/* Assignment panel — admin only */}
-      {isAdmin && (
-        <div className="mt-4 bg-white rounded-xl border border-blue-100 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <UserCheck size={16} className="text-blue-500" />
-            <h3 className="font-semibold text-gray-700 text-sm">Atribuições da adaptação</h3>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Professor responsável</label>
-              <div className="relative">
-                <select
-                  value={assignTeacherId}
-                  onChange={(e) => setAssignTeacherId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm appearance-none pr-8"
-                >
-                  <option value="">Sem professor</option>
-                  {teachers.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
-                  ))}
-                </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Aluno destinatário
-                {!assignStudentId && data.profile && (
-                  <span className="ml-1 text-purple-500">(perfil: {data.profile.name})</span>
-                )}
-              </label>
-              <div className="relative">
-                <select
-                  value={assignStudentId}
-                  onChange={(e) => setAssignStudentId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm appearance-none pr-8"
-                >
-                  <option value="">Sem aluno (por perfil)</option>
-                  {students.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name} — {s.email}</option>
-                  ))}
-                </select>
-                <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => saveAssignment(false)}
-              disabled={savingAssign}
-              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 hover:bg-gray-50 text-xs font-medium px-3 py-2 rounded-lg"
-            >
-              {savingAssign ? <Loader2 size={12} className="animate-spin" /> : <UserCheck size={12} />}
-              Salvar atribuições
-            </button>
-            <button
-              onClick={() => saveAssignment(true)}
-              disabled={savingAssign || data.status === "published"}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-2 rounded-lg"
-            >
-              {savingAssign ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-              Salvar + Publicar para aluno
-            </button>
-            {data.status === "published" && (
-              <span className="text-xs text-green-600 flex items-center gap-1">
-                <CheckCircle size={12} /> Publicado
-              </span>
-            )}
-          </div>
-        </div>
-      )}
     </AdminLayout>
   );
 }

@@ -1,0 +1,54 @@
+# ──────────────────────────────────────────────────────────────
+# EduAdapt AI — Produção (VPS / servidor próprio)
+# Para Railway ou Render: usar o dashboard, não este arquivo.
+#
+# Uso:
+#   cp .env.prod.example .env.prod
+#   # edite .env.prod com valores reais
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# ──────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Porta NÃO exposta: banco só acessível pelo container api
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      ENVIRONMENT: production
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      API_BASE_URL: ${API_BASE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Persistir imagens e áudios gerados entre restarts
+      - api_static:/app/static
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  api_static:

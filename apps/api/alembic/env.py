@@ -7,8 +7,8 @@ from sqlmodel import SQLModel
 # Import all models so Alembic detects them
 from app.models import (  # noqa: F401
     User, StudentProfile, Student, TeacherStudent,
-    Activity, ActivityAdaptation, StudentActivityAttempt,
-    ApiKey, AgentRun,
+    Story, Activity, ActivityAdaptation, StudentActivityAttempt,
+    ApiKey, AgentRun, GalleryImage, IconSymbol,
 )
 
 config = context.config

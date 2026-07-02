@@ -1,15 +1,19 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { DragEvent } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import StudentLayout from "@/components/layout/StudentLayout";
+import StudentHeaderMenu from "@/components/layout/StudentHeaderMenu";
 import api from "@/lib/api";
 import toast from "react-hot-toast";
-import { CheckCircle, Volume2, RotateCcw } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle, FileDown, Loader2, RotateCcw, Volume2, BookOpen } from "lucide-react";
 import clsx from "clsx";
+import { getDisciplineHref, groupActivitiesByDiscipline, type StudentActivityCard } from "@/lib/student-area";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-type ActivityItem = string | { name: string; image_url?: string; image_prompt?: string };
-type ActivityZone = string | { name: string };
+// Types
+type ActivityItem = string | { name?: string; description?: string; image_url?: string; image_prompt?: string; emoji?: string; symbol?: string };
+type ActivityZone = string | { name?: string; description?: string };
 type InteractionType = "drag_and_drop" | "sequencing" | "multiple_choice";
 
 const getLabel = (v: ActivityItem | ActivityZone): string => {
@@ -20,6 +24,9 @@ const getLabel = (v: ActivityItem | ActivityZone): string => {
 
 const getImageUrl = (v: ActivityItem): string | undefined =>
   typeof v === "string" ? undefined : v.image_url;
+
+const getSymbol = (v: ActivityItem): string | undefined =>
+  typeof v === "string" ? undefined : v.emoji || v.symbol;
 
 interface InteractionOption {
   type: InteractionType;
@@ -36,35 +43,86 @@ interface ImageOption {
   description: string;
   is_active?: boolean;
   image_url?: string | null;
+  emoji?: string;
+  symbol?: string;
 }
 
 interface OutputData {
   text_adaptations?: Array<{ version: number; content: string }>;
-  audio_options?: Array<{ id?: string; script: string; voice_style: string }>;
+  audio_options?: Array<{ id?: string; script: string; tts_script?: string; voice_style: string; audio_url?: string | null; rhythm?: number }>;
   interaction_options?: InteractionOption[];
+  image_options?: ImageOption[];
+  math_formatting?: MathFormatting;
+}
+
+interface MathFormattingRow {
+  kind: "operand" | "line" | "result";
+  operator: string;
+  value: string;
+}
+
+interface MathFormattingBlock {
+  type: "addition" | "subtraction" | "multiplication" | "division";
+  label: string;
+  symbol: string;
+  operands: number[];
+  result: string;
+  rows: MathFormattingRow[];
+  steps?: string[];
+}
+
+interface MathFormatting {
+  version: number;
+  source: string;
+  layout: "centered_large_numbers";
+  blocks: MathFormattingBlock[];
+}
+interface StoryData {
+  id: string;
+  title: string;
+  content: string;
+  audio_options?: Array<{ id?: string; script: string; tts_script?: string; voice_style?: string; audio_url?: string | null; rhythm?: number }>;
   image_options?: ImageOption[];
 }
 
-// ─── Item card (shared across interaction types) ──────────────────────────────
+// Types
 function ItemCard({
   item,
   feedback,
   onClick,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
+  isDragging = false,
   className,
 }: {
   item: ActivityItem;
   feedback?: "correct" | "incorrect";
   onClick?: () => void;
+  draggable?: boolean;
+  onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
+  isDragging?: boolean;
   className?: string;
 }) {
   const lbl = getLabel(item);
   const img = getImageUrl(item);
+  const symbol = getSymbol(item);
   return (
     <div
-      onClick={onClick}
+      onClick={(event) => {
+        if (!onClick) return;
+        event.stopPropagation();
+        onClick();
+      }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={clsx(
         "rounded-xl border-2 text-center select-none transition-all duration-200",
+        draggable ? "cursor-grab active:cursor-grabbing active:scale-95" : "",
         onClick ? "cursor-pointer active:scale-95" : "",
+        isDragging && "opacity-50 scale-95",
         feedback === "correct" && "border-green-400 bg-green-50 animate-pulse",
         feedback === "incorrect" && "border-red-400 bg-red-50",
         !feedback && "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50",
@@ -74,14 +132,18 @@ function ItemCard({
       {img && (
         <img src={img} alt={lbl} className="w-full h-24 object-cover rounded-t-xl" />
       )}
-      <p className={clsx("font-medium text-gray-800 px-2 py-2 text-sm", img && "border-t border-gray-100")}>
+      {!img && symbol && (
+        <div className="w-full h-24 rounded-t-xl bg-amber-50 flex items-center justify-center text-5xl">
+          {symbol}
+        </div>
+      )}
+      <p className={clsx("font-medium text-gray-800 px-2 py-2 text-sm", (img || symbol) && "border-t border-gray-100")}>
         {lbl}
       </p>
     </div>
   );
 }
-
-// ─── DragAndDrop ──────────────────────────────────────────────────────────────
+// Drag and drop
 function DragAndDrop({
   interaction,
   answers,
@@ -93,63 +155,134 @@ function DragAndDrop({
   feedback: Record<string, "correct" | "incorrect">;
   onAnswer: (itemLabel: string, zoneLabel: string | null) => void;
 }) {
+  const [draggedLabel, setDraggedLabel] = useState<string | null>(null);
+  const [overZone, setOverZone] = useState<string | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
+  const isLocked = Object.keys(feedback).length > 0;
+
+  function handleDragStart(event: DragEvent<HTMLDivElement>, itemLabel: string) {
+    if (isLocked) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", itemLabel);
+    setDraggedLabel(itemLabel);
+  }
+
+  function finishDrag() {
+    setDraggedLabel(null);
+    setOverZone(null);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>, zoneLabel: string) {
+    event.preventDefault();
+    const itemLabel = event.dataTransfer.getData("text/plain") || draggedLabel;
+    if (itemLabel && !isLocked) {
+      onAnswer(itemLabel, zoneLabel);
+    }
+    setSelectedLabel(null);
+    finishDrag();
+  }
+
+  function handlePoolDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const itemLabel = event.dataTransfer.getData("text/plain") || draggedLabel;
+    if (itemLabel && !isLocked) {
+      onAnswer(itemLabel, null);
+    }
+    setSelectedLabel(null);
+    finishDrag();
+  }
+
+  function handleZoneClick(zoneLabel: string) {
+    if (selectedLabel && !isLocked) {
+      onAnswer(selectedLabel, zoneLabel);
+      setSelectedLabel(null);
+    }
+  }
+
+  const unplaced = interaction.items.filter((item) => !answers[getLabel(item)]);
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
         {interaction.zones.map((zone) => {
           const zoneLabel = getLabel(zone);
-          const placed = interaction.items.filter((i) => answers[getLabel(i)] === zoneLabel);
+          const placed = interaction.items.filter((item) => answers[getLabel(item)] === zoneLabel);
           return (
-            <div key={zoneLabel} className="border-2 border-dashed border-blue-200 rounded-xl p-3 min-h-28 bg-blue-50/30">
-              <p className="text-center font-semibold text-blue-600 mb-2 text-sm">{zoneLabel}</p>
-              <div className="space-y-2">
-                {placed.map((item) => (
-                  <ItemCard
-                    key={getLabel(item)}
-                    item={item}
-                    feedback={feedback[getLabel(item)]}
-                    onClick={() => onAnswer(getLabel(item), null)}
-                    className="text-xs"
-                  />
-                ))}
+            <div
+              key={zoneLabel}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setOverZone(zoneLabel);
+              }}
+              onDragLeave={() => setOverZone((current) => current === zoneLabel ? null : current)}
+              onDrop={(event) => handleDrop(event, zoneLabel)}
+              onClick={() => handleZoneClick(zoneLabel)}
+              className={clsx(
+                "border-2 border-dashed rounded-xl p-3 min-h-44 bg-blue-50/30 transition-colors",
+                overZone === zoneLabel ? "border-blue-500 bg-blue-100/70" : "border-blue-200"
+              )}
+            >
+              <p className="text-center font-semibold text-blue-700 mb-3 text-base">{zoneLabel}</p>
+              <div className="grid grid-cols-2 gap-2">
+                {placed.map((item) => {
+                  const itemLabel = getLabel(item);
+                  return (
+                    <ItemCard
+                      key={itemLabel}
+                      item={item}
+                      feedback={feedback[itemLabel]}
+                      draggable={!isLocked}
+                      onDragStart={(event) => handleDragStart(event, itemLabel)}
+                      onDragEnd={finishDrag}
+                      onClick={() => setSelectedLabel((current) => current === itemLabel ? null : itemLabel)}
+                      isDragging={draggedLabel === itemLabel}
+                      className={clsx("text-xs min-h-28", selectedLabel === itemLabel && "ring-2 ring-blue-400 border-blue-400")}
+                    />
+                  );
+                })}
               </div>
             </div>
           );
         })}
       </div>
 
-      <div className="flex flex-wrap gap-2 justify-center mb-4">
-        {interaction.items
-          .filter((item) => !answers[getLabel(item)])
-          .map((item) => {
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={handlePoolDrop}
+        onClick={() => {
+          if (selectedLabel && !isLocked) {
+            onAnswer(selectedLabel, null);
+            setSelectedLabel(null);
+          }
+        }}
+        className="rounded-xl border border-gray-100 bg-gray-50 p-3 mb-4"
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {unplaced.map((item) => {
             const itemLabel = getLabel(item);
             return (
-              <div key={itemLabel} className="flex flex-col items-center gap-1.5">
-                <ItemCard item={item} className="w-28" />
-                <div className="flex gap-1 flex-wrap justify-center">
-                  {interaction.zones.map((zone) => {
-                    const zoneLabel = getLabel(zone);
-                    return (
-                      <button
-                        key={zoneLabel}
-                        onClick={() => onAnswer(itemLabel, zoneLabel)}
-                        className="bg-white border border-gray-300 hover:border-blue-400 hover:bg-blue-50 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-700 transition-colors"
-                      >
-                        → {zoneLabel}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <ItemCard
+                key={itemLabel}
+                item={item}
+                draggable={!isLocked}
+                onDragStart={(event) => handleDragStart(event, itemLabel)}
+                onDragEnd={finishDrag}
+                onClick={() => setSelectedLabel((current) => current === itemLabel ? null : itemLabel)}
+                isDragging={draggedLabel === itemLabel}
+                className={clsx("min-h-32", selectedLabel === itemLabel && "ring-2 ring-blue-400 border-blue-400")}
+              />
             );
           })}
+        </div>
       </div>
     </>
   );
 }
 
-// ─── Sequencing ───────────────────────────────────────────────────────────────
-// Tap items in the correct order — each tap assigns the next position.
 function Sequencing({
   interaction,
   answers,
@@ -201,10 +334,10 @@ function Sequencing({
                   !fb && "border-blue-200 bg-white",
                 )}
               >
-                <span className="text-lg font-bold text-blue-600 w-7 text-center">{idx + 1}°</span>
+                <span className="text-lg font-bold text-blue-600 w-7 text-center">{idx + 1}º</span>
                 <span className="font-medium text-gray-800">{lbl}</span>
-                {fb === "correct" && <span className="ml-auto text-green-600 text-sm font-bold">✓</span>}
-                {fb === "incorrect" && <span className="ml-auto text-red-500 text-sm font-bold">✗</span>}
+                {fb === "correct" && <span className="ml-auto text-green-600 text-sm font-bold">Correto</span>}
+                {fb === "incorrect" && <span className="ml-auto text-red-500 text-sm font-bold">Rever</span>}
               </div>
             );
           })}
@@ -215,7 +348,7 @@ function Sequencing({
       {unplaced.length > 0 && (
         <>
           <p className="text-center text-sm text-gray-500 mb-3">
-            Toque no item que vem em <strong>{ordered.length + 1}° lugar</strong>
+            Toque no item que vem em <strong>{ordered.length + 1}º lugar</strong>
           </p>
           <div className="flex flex-wrap gap-2 justify-center mb-4">
             {unplaced.map((item) => (
@@ -243,7 +376,7 @@ function Sequencing({
   );
 }
 
-// ─── MultipleChoice ───────────────────────────────────────────────────────────
+// Multiple choice
 function MultipleChoice({
   interaction,
   answers,
@@ -284,30 +417,146 @@ function MultipleChoice({
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+function MathFormattingPanel({ formatting }: { formatting?: MathFormatting }) {
+  const blocks = formatting?.blocks ?? [];
+  if (!blocks.length) return null;
+
+  return (
+    <section className="mb-4 rounded-2xl border border-blue-100 bg-white p-5">
+      <p className="mb-4 text-center text-sm font-bold uppercase text-blue-700">
+        Calcule com atencao
+      </p>
+      <div className="space-y-4">
+        {blocks.map((block, index) => (
+          <div key={`${block.type}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="mb-3 text-center text-base font-bold text-slate-800">{block.label}</p>
+            <div className="mx-auto w-fit min-w-48 rounded-xl bg-white px-7 py-5 shadow-sm">
+              {block.rows.map((row, rowIndex) => {
+                if (row.kind === "line") {
+                  return <div key={rowIndex} className="my-1 border-t-4 border-slate-900" />;
+                }
+                return (
+                  <div key={rowIndex} className="grid grid-cols-[2rem_1fr] items-baseline gap-3 font-mono text-5xl font-black leading-tight text-slate-950 sm:text-6xl">
+                    <span className="text-right">{row.operator}</span>
+                    <span className="whitespace-pre text-right tabular-nums">{row.value}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {block.steps?.length ? (
+              <div className="mt-3 text-center text-sm font-medium text-slate-600">
+                {block.steps.map((step) => (
+                  <p key={step}>{step}</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NarrationTextDetails({ script }: { script?: string }) {
+  const text = script?.trim();
+  if (!text) return null;
+
+  return (
+    <details className="mt-3 rounded-xl border border-blue-100 bg-white/70">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-blue-700">
+        Ver texto da locução
+      </summary>
+      <pre className="border-t border-blue-100 px-3 py-3 text-sm text-gray-700 whitespace-pre-wrap font-sans">
+        {text}
+      </pre>
+    </details>
+  );
+}
+
+// Main page
 export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [title, setTitle] = useState<string | null>(null);
+  const [story, setStory] = useState<StoryData | null>(null);
+  const [discipline, setDiscipline] = useState<string | null>(null);
+  const [activities, setActivities] = useState<StudentActivityCard[]>([]);
   const [output, setOutput] = useState<OutputData | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, "correct" | "incorrect">>({});
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState<{ score: number; max_score: number; percentage: number } | null>(null);
   const [startTime] = useState<number>(Date.now());
+  const [exporting, setExporting] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const storyAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  function playNarration(
+    option: { script?: string; tts_script?: string; audio_url?: string | null; rhythm?: number },
+    audioElement: HTMLAudioElement | null,
+  ) {
+    if (option.audio_url && audioElement) {
+      audioElement.play().catch(() => toast.error("Não foi possível iniciar o áudio."));
+      return;
+    }
+
+    const textToSpeak = (option.tts_script || option.script || "").trim();
+    if (!textToSpeak) {
+      toast.error("Não há roteiro de áudio para reproduzir.");
+      return;
+    }
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("Este navegador não suporta leitura em voz alta.");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.lang = "pt-BR";
+    utterance.rate = Math.max(0.5, Math.min(1.2, option.rhythm ?? 0.9));
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function handleExportPDF() {
+    setExporting(true);
+    try {
+      const response = await api.get(`/student/activities/${id}/pdf`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${title ?? "atividade"}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Não foi possível exportar o PDF.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
-    api.get(`/student/activities/${id}`)
-      .then(async (r) => {
-        setTitle(r.data.title ?? null);
-        setOutput(r.data.output);
+    Promise.all([
+      api.get(`/student/activities/${id}`),
+      api.get("/student/activities"),
+    ])
+      .then(async ([activityRes, listRes]) => {
+        setTitle(activityRes.data.title ?? null);
+        setDiscipline(activityRes.data.discipline ?? null);
+        setStory(activityRes.data.story ?? null);
+        setOutput(activityRes.data.output);
+        setActivities(Array.isArray(listRes.data) ? listRes.data : []);
         await api.post(`/student/activities/${id}/start`).catch(() => {});
       })
       .catch(() => {
         toast.error("Atividade não encontrada.");
         router.push("/student");
       });
-  }, [id]);
+  }, [id, router]);
 
   function handleAnswer(itemLabel: string, zoneLabel: string | null) {
     setAnswers((prev) => {
@@ -352,6 +601,22 @@ export default function StudentActivityPage() {
     }
   }
 
+  const exportButton = output ? (
+    <button
+      onClick={handleExportPDF}
+      disabled={exporting}
+      aria-label="Exportar atividade em PDF para impressão"
+      className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-700 border border-blue-200 bg-white hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {exporting ? (
+        <Loader2 size={15} className="animate-spin" />
+      ) : (
+        <FileDown size={15} />
+      )}
+      {exporting ? "Gerando…" : "Exportar PDF"}
+    </button>
+  ) : null;
+
   if (!output) return (
     <StudentLayout>
       <div className="flex justify-center py-20">
@@ -363,61 +628,128 @@ export default function StudentActivityPage() {
   const text = output.text_adaptations?.[0]?.content;
   const audio = output.audio_options?.[0];
   const interaction = output.interaction_options?.[0];
-  const visualImages = (output.image_options ?? []).filter((img) => img.is_active && img.image_url);
+  const visualImages = (output.image_options ?? []).filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
+  const storyImages = (story?.image_options ?? []).filter((img) => img.is_active && (img.image_url || img.emoji || img.symbol));
+  const storyAudio = story?.audio_options?.[0];
 
   const allAnswered = interaction
     ? interaction.items.every((item) => answers[getLabel(item)])
     : false;
 
+  const disciplineGroups = groupActivitiesByDiscipline(activities);
+  const nextActivityId = (() => {
+    const ordered = [...activities].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const current = ordered.findIndex((activity) => activity.id === id);
+    if (current === -1) return null;
+
+    if (discipline) {
+      const sameDiscipline = ordered.filter((activity) => (activity.discipline || "Sem disciplina") === discipline);
+      const currentInDiscipline = sameDiscipline.findIndex((activity) => activity.id === id);
+      if (currentInDiscipline >= 0 && sameDiscipline[currentInDiscipline + 1]) {
+        return sameDiscipline[currentInDiscipline + 1].id;
+      }
+    }
+
+    return ordered[current + 1]?.id ?? null;
+  })();
+
+  const headerAction = (
+    <StudentHeaderMenu
+      disciplines={disciplineGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        href: getDisciplineHref(group.id),
+      }))}
+      onExportAll={handleExportPDF}
+      exportDisabled={exporting}
+    />
+  );
+
   return (
-    <StudentLayout>
+    <StudentLayout headerAction={headerAction}>
+      {story && (
+        <section className="bg-white rounded-2xl border border-amber-100 shadow-sm overflow-hidden mb-5">
+          <div className="bg-amber-50 border-b border-amber-100 px-5 py-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <BookOpen size={20} className="text-amber-600 flex-shrink-0" />
+              <h2 className="font-bold text-gray-900">{story.title}</h2>
+            </div>
+          </div>
+          <div className="p-5">
+            {storyImages.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                {storyImages.map((img) => (
+                  <div key={img.id} className="rounded-xl border border-amber-100 bg-amber-50 text-center overflow-hidden">
+                    {img.image_url ? (
+                      <img src={img.image_url} alt={img.description} className="w-full h-28 object-cover" />
+                    ) : (
+                      <div className="h-28 flex items-center justify-center text-5xl">{img.emoji || img.symbol}</div>
+                    )}
+                    <p className="text-xs text-gray-600 px-2 py-2">{img.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/30 p-4 mb-4">
+              <pre className="text-base text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">{story.content}</pre>
+            </div>
+
+            {storyAudio && (
+              <div className="rounded-xl border border-blue-100 bg-white p-4">
+                <div className="flex items-center gap-2 text-blue-600 text-sm font-semibold mb-2">
+                  <Volume2 size={16} /> Narração do conto
+                </div>
+                <div className="space-y-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => playNarration(storyAudio, storyAudioRef.current)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl"
+                  >
+                    <Volume2 size={16} /> Ouvir narração
+                  </button>
+                  {storyAudio.audio_url && (
+                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                    <audio ref={storyAudioRef} controls src={storyAudio.audio_url} className="w-full h-9 rounded-lg" />
+                  )}
+                </div>
+                {!storyAudio.audio_url && (
+                  <p className="text-xs text-blue-500 mb-3">
+                    Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
+                  </p>
+                )}
+                <NarrationTextDetails script={storyAudio.script} />
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {title && (
         <h1 className="text-lg font-bold text-gray-900 mb-4">{title}</h1>
       )}
 
-      {submitted && result ? (
-        <div className="text-center py-10">
-          <CheckCircle size={48} className="mx-auto text-green-500 mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Parabéns!</h2>
-          <p className="text-gray-600 mb-4">Você completou a atividade.</p>
-          <div className="inline-block bg-green-50 border border-green-200 rounded-2xl px-8 py-4 mb-6">
-            <p className="text-4xl font-bold text-green-700">{result.percentage}%</p>
-            <p className="text-sm text-gray-500">{result.score} de {result.max_score} pontos</p>
-          </div>
-
-          {/* Per-item feedback */}
-          {interaction && Object.keys(feedback).length > 0 && (
-            <div className="text-left max-w-sm mx-auto mb-6 space-y-2">
-              {interaction.items.map((item) => {
-                const lbl = getLabel(item);
-                const fb = feedback[lbl];
-                const correct = interaction.correct_answer?.[lbl] ?? interaction.correct_answer?.correct_zone;
-                return (
-                  <div key={lbl} className={clsx("flex items-center justify-between rounded-lg px-4 py-2 text-sm", fb === "correct" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
-                    <span className="font-medium">{lbl}</span>
-                    <span className="text-xs">{fb === "correct" ? "✓ correto" : correct ? `✗ era "${correct}"` : "✗ incorreto"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <button onClick={() => router.push("/student")}
-            className="block mx-auto bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2.5 rounded-xl">
-            Voltar
-          </button>
-        </div>
-      ) : (
-        <div>
+      <div
+        className={clsx(
+          "transition duration-300",
+          submitted && result && "pointer-events-none select-none opacity-60 blur-[3px]",
+        )}
+      >
           {visualImages.length > 0 && (
             <div className="flex gap-3 overflow-x-auto mb-4 pb-1">
               {visualImages.map((img) => (
                 <div key={img.id} className="flex-shrink-0 text-center">
-                  <img
-                    src={img.image_url!}
-                    alt={img.description}
-                    className="w-36 h-36 object-cover rounded-xl border border-blue-100 shadow-sm"
-                  />
+                  {img.image_url ? (
+                    <img
+                      src={img.image_url}
+                      alt={img.description}
+                      className="w-36 h-36 object-cover rounded-xl border border-blue-100 shadow-sm"
+                    />
+                  ) : (
+                    <div className="w-36 h-36 rounded-xl border border-blue-100 shadow-sm bg-amber-50 flex items-center justify-center text-6xl">
+                      {img.emoji || img.symbol}
+                    </div>
+                  )}
                   <p className="text-xs text-gray-500 mt-1">{img.description}</p>
                 </div>
               ))}
@@ -433,12 +765,31 @@ export default function StudentActivityPage() {
           {audio && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4 flex items-start gap-3">
               <Volume2 size={18} className="text-blue-500 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs text-blue-500 font-medium mb-1">Áudio — {audio.voice_style}</p>
-                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{audio.script}</pre>
+              <div className="flex-1">
+                <p className="text-xs text-blue-500 font-medium mb-1">Narração — {audio.voice_style}</p>
+                <div className="space-y-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => playNarration(audio, audioRef.current)}
+                    className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl"
+                  >
+                    <Volume2 size={16} /> Ouvir narração
+                  </button>
+                  {audio.audio_url && (
+                    <audio ref={audioRef} controls src={audio.audio_url} className="w-full h-9 rounded-lg" />
+                  )}
+                </div>
+                {!audio.audio_url && (
+                  <p className="text-xs text-blue-500 mb-3">
+                    Áudio MP3 ainda não gerado. Usando leitura em voz alta do navegador.
+                  </p>
+                )}
+                <NarrationTextDetails script={audio.script} />
               </div>
             </div>
           )}
+
+          <MathFormattingPanel formatting={output.math_formatting} />
 
           {interaction && (
             <div className="bg-white rounded-2xl border border-blue-100 p-6">
@@ -475,7 +826,103 @@ export default function StudentActivityPage() {
               )}
             </div>
           )}
-        </div>
+      </div>
+
+      {submitted && result && (
+        <>
+          <Link
+            href="/student"
+            className="fixed left-0 top-1/2 z-40 flex -translate-y-1/2 items-center gap-2 rounded-r-2xl border border-l-0 border-white/70 bg-white/90 px-3 py-4 text-sm font-semibold text-blue-700 shadow-xl backdrop-blur"
+          >
+            <ArrowLeft size={18} />
+            Lista
+          </Link>
+
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm [animation:result-backdrop-in_180ms_ease-out]">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="activity-result-title"
+              className="w-full max-w-xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-2xl [animation:result-modal-in_220ms_ease-out]"
+            >
+              <div className="border-b border-slate-100 bg-gradient-to-br from-emerald-50 to-blue-50 px-6 py-6 text-center">
+                <CheckCircle size={44} className="mx-auto mb-3 text-emerald-500" />
+                <h2 id="activity-result-title" className="text-2xl font-bold text-slate-950">
+                  Parabéns!
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">Você completou a atividade.</p>
+                <div className="mt-5 inline-flex items-end gap-2 rounded-2xl border border-emerald-100 bg-white px-6 py-4 shadow-sm">
+                  <span className="text-5xl font-black leading-none text-emerald-600">{result.percentage}%</span>
+                  <span className="pb-1 text-sm font-medium text-slate-500">
+                    {result.score} de {result.max_score} pontos
+                  </span>
+                </div>
+              </div>
+
+              {interaction && Object.keys(feedback).length > 0 && (
+                <div className="max-h-64 overflow-auto px-6 py-4">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    Resultado individual
+                  </p>
+                  <div className="space-y-2">
+                    {interaction.items.map((item) => {
+                      const itemLabel = getLabel(item);
+                      const displayLabel =
+                        interaction.type === "multiple_choice"
+                          ? answers[itemLabel] || itemLabel
+                          : itemLabel;
+                      const itemFeedback = feedback[itemLabel];
+                      const correct = interaction.correct_answer?.[itemLabel] ?? interaction.correct_answer?.correct_zone;
+
+                      return (
+                        <div
+                          key={itemLabel}
+                          className={clsx(
+                            "flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm",
+                            itemFeedback === "correct"
+                              ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                              : "border-rose-100 bg-rose-50 text-rose-800",
+                          )}
+                        >
+                          <span className="min-w-0 truncate font-semibold">{displayLabel}</span>
+                          <span className="shrink-0 text-xs font-bold">
+                            {itemFeedback === "correct" ? "Correto" : correct ? `Resposta: ${correct}` : "Rever"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-6 py-5 sm:flex-row">
+                {nextActivityId ? (
+                  <Link
+                    href={`/student/activities/${nextActivityId}`}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-base font-bold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Próxima atividade
+                    <ArrowRight size={18} />
+                  </Link>
+                ) : (
+                  <Link
+                    href="/student"
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 py-3 text-base font-bold text-white transition-colors hover:bg-blue-700"
+                  >
+                    Voltar para lista
+                  </Link>
+                )}
+                <Link
+                  href="/student"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-200 bg-white px-6 py-3 text-base font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                >
+                  <ArrowLeft size={18} />
+                  Lista
+                </Link>
+              </div>
+            </section>
+          </div>
+        </>
       )}
     </StudentLayout>
   );
