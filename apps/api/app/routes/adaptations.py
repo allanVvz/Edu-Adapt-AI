@@ -39,6 +39,19 @@ def _story_pdf_data(story: Story | None) -> dict | None:
     }
 
 
+def _activity_math_context(activity: Activity | None) -> dict:
+    if not activity:
+        return {}
+    return {
+        "title": activity.title,
+        "discipline": activity.discipline,
+        "statement": activity.statement,
+        "question": activity.question,
+        "expected_answer": activity.expected_answer,
+        "teacher_notes": activity.teacher_notes,
+    }
+
+
 @router.get("")
 def list_adaptations(
     status: Optional[str] = None,
@@ -112,7 +125,11 @@ def get_adaptation(
         "generated_by": adaptation.generated_by,
         "status": adaptation.status,
         "version": adaptation.version,
-        "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
+        "output": normalized_output_data(
+            adaptation.output_data,
+            str(request.base_url).rstrip("/"),
+            activity=_activity_math_context(activity),
+        ),
         "validator_feedback": adaptation.validator_feedback,
         "teacher_feedback": adaptation.teacher_feedback,
         "created_at": adaptation.created_at,
@@ -753,7 +770,7 @@ def download_adaptation_pdf(
 
     cfg = get_profile_config(profile_name)
     pdf_bytes = AdaptationPDFRenderer(
-        output_data=adaptation.output_data,
+        output_data=normalized_output_data(adaptation.output_data, activity=_activity_math_context(activity)),
         activity_title=title,
         config=cfg,
         discipline=discipline,

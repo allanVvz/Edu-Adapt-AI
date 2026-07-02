@@ -52,6 +52,30 @@ interface OutputData {
   audio_options?: Array<{ id?: string; script: string; tts_script?: string; voice_style: string; audio_url?: string | null; rhythm?: number }>;
   interaction_options?: InteractionOption[];
   image_options?: ImageOption[];
+  math_formatting?: MathFormatting;
+}
+
+interface MathFormattingRow {
+  kind: "operand" | "line" | "result";
+  operator: string;
+  value: string;
+}
+
+interface MathFormattingBlock {
+  type: "addition" | "subtraction" | "multiplication" | "division";
+  label: string;
+  symbol: string;
+  operands: number[];
+  result: string;
+  rows: MathFormattingRow[];
+  steps?: string[];
+}
+
+interface MathFormatting {
+  version: number;
+  source: string;
+  layout: "centered_large_numbers";
+  blocks: MathFormattingBlock[];
 }
 interface StoryData {
   id: string;
@@ -393,6 +417,46 @@ function MultipleChoice({
   );
 }
 
+function MathFormattingPanel({ formatting }: { formatting?: MathFormatting }) {
+  const blocks = formatting?.blocks ?? [];
+  if (!blocks.length) return null;
+
+  return (
+    <section className="mb-4 rounded-2xl border border-blue-100 bg-white p-5">
+      <p className="mb-4 text-center text-sm font-bold uppercase text-blue-700">
+        Calcule com atencao
+      </p>
+      <div className="space-y-4">
+        {blocks.map((block, index) => (
+          <div key={`${block.type}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="mb-3 text-center text-base font-bold text-slate-800">{block.label}</p>
+            <div className="mx-auto w-fit min-w-48 rounded-xl bg-white px-7 py-5 shadow-sm">
+              {block.rows.map((row, rowIndex) => {
+                if (row.kind === "line") {
+                  return <div key={rowIndex} className="my-1 border-t-4 border-slate-900" />;
+                }
+                return (
+                  <div key={rowIndex} className="grid grid-cols-[2rem_1fr] items-baseline gap-3 font-mono text-5xl font-black leading-tight text-slate-950 sm:text-6xl">
+                    <span className="text-right">{row.operator}</span>
+                    <span className="whitespace-pre text-right tabular-nums">{row.value}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {block.steps?.length ? (
+              <div className="mt-3 text-center text-sm font-medium text-slate-600">
+                {block.steps.map((step) => (
+                  <p key={step}>{step}</p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // Main page
 export default function StudentActivityPage() {
   const { id } = useParams<{ id: string }>();
@@ -469,7 +533,7 @@ export default function StudentActivityPage() {
         setDiscipline(activityRes.data.discipline ?? null);
         setStory(activityRes.data.story ?? null);
         setOutput(activityRes.data.output);
-        setActivities(listRes.data ?? []);
+        setActivities(Array.isArray(listRes.data) ? listRes.data : []);
         await api.post(`/student/activities/${id}/start`).catch(() => {});
       })
       .catch(() => {
@@ -708,6 +772,8 @@ export default function StudentActivityPage() {
               </div>
             </div>
           )}
+
+          <MathFormattingPanel formatting={output.math_formatting} />
 
           {interaction && (
             <div className="bg-white rounded-2xl border border-blue-100 p-6">

@@ -62,6 +62,19 @@ def _story_pdf_data(story: Story | None) -> dict | None:
     }
 
 
+def _activity_math_context(activity: Activity | None) -> dict:
+    if not activity:
+        return {}
+    return {
+        "title": activity.title,
+        "discipline": activity.discipline,
+        "statement": activity.statement,
+        "question": activity.question,
+        "expected_answer": activity.expected_answer,
+        "teacher_notes": activity.teacher_notes,
+    }
+
+
 def _percent(score: float | None, max_score: float | None) -> int | None:
     if score is None or max_score in (None, 0):
         return None
@@ -246,7 +259,7 @@ def export_all_activities_pdf(
         discipline = activity.discipline if activity else None
         story = session.get(Story, activity.story_id) if activity and activity.story_id else None
         renderers.append(AdaptationPDFRenderer(
-            output_data=adaptation.output_data,
+            output_data=normalized_output_data(adaptation.output_data, activity=_activity_math_context(activity)),
             activity_title=title,
             config=cfg,
             discipline=discipline,
@@ -288,7 +301,11 @@ def get_student_activity(
         "discipline": activity.discipline if activity else None,
         "story_summary": serialize_story_summary(story),
         "story": serialize_story_detail(story, str(request.base_url).rstrip("/")),
-        "output": normalized_output_data(adaptation.output_data, str(request.base_url).rstrip("/")),
+        "output": normalized_output_data(
+            adaptation.output_data,
+            str(request.base_url).rstrip("/"),
+            activity=_activity_math_context(activity),
+        ),
     }
 
 
@@ -401,7 +418,7 @@ def download_student_activity_pdf(
 
     cfg = get_profile_config(profile_name)
     pdf_bytes = AdaptationPDFRenderer(
-        output_data=adaptation.output_data,
+        output_data=normalized_output_data(adaptation.output_data, activity=_activity_math_context(activity)),
         activity_title=title,
         config=cfg,
         discipline=discipline,

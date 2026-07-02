@@ -2,6 +2,7 @@ from copy import deepcopy
 from typing import Any
 
 from .openai_service import _API_BASE_URL
+from .math_formatting_service import enhance_math_output_data
 
 
 def normalize_static_urls(value: Any, api_base_url: str | None = None) -> Any:
@@ -22,5 +23,10 @@ def normalize_static_urls(value: Any, api_base_url: str | None = None) -> Any:
     return value
 
 
-def normalized_output_data(output_data: dict | None, api_base_url: str | None = None) -> dict:
-    return normalize_static_urls(deepcopy(output_data or {}), api_base_url)
+def normalized_output_data(
+    output_data: dict | None,
+    api_base_url: str | None = None,
+    activity: dict | None = None,
+) -> dict:
+    data = enhance_math_output_data(output_data or {}, activity)
+    return normalize_static_urls(data, api_base_url)

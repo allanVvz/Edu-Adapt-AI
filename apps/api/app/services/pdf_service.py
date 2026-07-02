@@ -98,6 +98,7 @@ class AdaptationPDFRenderer:
         story.extend(self._draw_header())
         story.extend(self._draw_text_adaptations())
         story.extend(self._draw_instructions())
+        story.extend(self._draw_math_formatting())
         story.extend(self._draw_images())
         story.extend(self._draw_interaction())
         story.extend(self._draw_teacher_script())
@@ -111,6 +112,7 @@ class AdaptationPDFRenderer:
         story.extend(self._draw_header())
         story.extend(self._draw_text_adaptations())
         story.extend(self._draw_instructions())
+        story.extend(self._draw_math_formatting())
         story.extend(self._draw_images_inline())
         story.extend(self._draw_interaction())
         return story
@@ -300,6 +302,64 @@ class AdaptationPDFRenderer:
                 elements.extend(self._draw_multiple_choice(interaction))
             elif itype in ("drag_and_drop", "sequencing", "par"):
                 elements.extend(self._draw_drag_or_sequence(interaction))
+        return elements
+
+    def _draw_math_formatting(self) -> list:
+        blocks = self._data.get("math_formatting", {}).get("blocks", [])
+        if not blocks:
+            return []
+
+        elements: list[Any] = [
+            Paragraph("CALCULE COM ATENCAO:", self._styles["section_label"]),
+        ]
+        for block in blocks:
+            rows = block.get("rows", [])
+            if not rows:
+                continue
+            table_rows = []
+            for row in rows:
+                kind = row.get("kind")
+                operator = row.get("operator", "")
+                value = row.get("value", "")
+                if kind == "line":
+                    table_rows.append(["", HRFlowable(width="100%", thickness=2, color=self._cfg.text_color)])
+                else:
+                    table_rows.append([
+                        Paragraph(operator, self._styles["math_operator"]),
+                        Paragraph(str(value), self._styles["math_number"]),
+                    ])
+
+            calc_table = Table(
+                table_rows,
+                colWidths=[34, 150],
+                hAlign="CENTER",
+                style=TableStyle([
+                    ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]),
+            )
+            label = block.get("label", "Calculo")
+            steps = block.get("steps", [])
+            step_text = " ".join(str(step) for step in steps)
+            elements.append(
+                Table(
+                    [[Paragraph(label.upper(), self._styles["math_label"])], [calc_table], [Paragraph(step_text, self._styles["math_steps"])]],
+                    colWidths=[A4_USABLE_WIDTH],
+                    style=TableStyle([
+                        ("BOX", (0, 0), (-1, -1), 1.5, self._cfg.primary_color),
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FBFF")),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("TOPPADDING", (0, 0), (-1, -1), 10),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ]),
+                )
+            )
+            elements.append(Spacer(1, 14))
         return elements
 
     def _draw_multiple_choice(self, interaction: dict) -> list:
@@ -788,6 +848,38 @@ def _build_styles(cfg: PDFConfig) -> dict[str, ParagraphStyle]:
             textColor=tc,
             leading=fs_o * ls,
             leftIndent=14,
+        ),
+        "math_label": make(
+            "math_label",
+            fontName=FONT_BOLD,
+            fontSize=max(fs_b - 2, 12),
+            textColor=pc,
+            alignment=1,
+            spaceAfter=6,
+        ),
+        "math_operator": make(
+            "math_operator",
+            fontName="Courier-Bold",
+            fontSize=max(fs_i + 6, 28),
+            textColor=tc,
+            leading=max(fs_i + 10, 32),
+            alignment=2,
+        ),
+        "math_number": make(
+            "math_number",
+            fontName="Courier-Bold",
+            fontSize=max(fs_i + 6, 28),
+            textColor=tc,
+            leading=max(fs_i + 10, 32),
+            alignment=2,
+        ),
+        "math_steps": make(
+            "math_steps",
+            fontName=FONT,
+            fontSize=max(fs_b - 1, 11),
+            textColor=cfg.muted_color,
+            leading=max(fs_b - 1, 11) * ls,
+            alignment=1,
         ),
         "dnd_item": make(
             "dnd_item",
