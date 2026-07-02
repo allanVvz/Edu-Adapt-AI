@@ -10,10 +10,11 @@ from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.user import User
+from ..models.story import Story
 from ..models.activity import Activity
 from ..models.adaptation import ActivityAdaptation
 from ..models.student_profile import StudentProfile
-from .seed_apostila_portugues import _build_output_data
+from .seed_apostila_portugues import _build_output_data, _seed_context_story
 
 
 PROFILE_NAMES = {
@@ -361,6 +362,106 @@ APOSTILA_MATEMATICA_ACTIVITIES = [
 ]
 
 
+MATH_STORY_DEFINITIONS = [
+    {
+        "title": "Numeros ate 100 e material dourado",
+        "codes": {"AT-MAT-06", "AT-MAT-07", "AT-MAT-08", "AT-MAT-09"},
+        "audio_id": "math_numbers_audio_1",
+        "content": (
+            "Nesta parte da apostila, usamos numeros ate 100. "
+            "Primeiro observamos a sequencia dos numeros. Depois comparamos qual numero e maior ou menor. "
+            "Para entender melhor, usamos dezenas e unidades. "
+            "Uma dezena vale 10 unidades. No material dourado, uma barra representa uma dezena e um cubinho representa uma unidade. "
+            "No abaco, a coluna D mostra as dezenas e a coluna U mostra as unidades. "
+            "Depois de observar esse apoio, resolva as atividades de sequencia, decomposicao, material dourado e abaco."
+        ),
+        "images": [
+            {"id": "math_numbers_img_1", "description": "quadro numerico ate 100", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_numbers_img_2", "description": "material dourado com dezenas e unidades", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_numbers_img_3", "description": "abaco com colunas D e U", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+        ],
+    },
+    {
+        "title": "Fila e numeros ordinais",
+        "codes": {"AT-MAT-10", "AT-MAT-11"},
+        "audio_id": "math_ordinals_audio_1",
+        "content": (
+            "Os numeros ordinais mostram posicao, ordem ou lugar. "
+            "Primeiro quer dizer 1. Segundo quer dizer 2. Terceiro quer dizer 3. "
+            "Quando observamos uma fila, contamos da esquerda para a direita para descobrir a posicao de cada pessoa ou objeto. "
+            "Use esse apoio para responder as atividades sobre desenhos em sequencia, fila das criancas e escrita dos ordinais."
+        ),
+        "images": [
+            {"id": "math_ordinals_img_1", "description": "fila de criancas", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_ordinals_img_2", "description": "cartoes primeiro segundo terceiro", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+        ],
+    },
+    {
+        "title": "Historias de adicao e subtracao",
+        "codes": {"AT-MAT-12", "AT-MAT-13", "AT-MAT-14", "AT-MAT-15", "AT-MAT-16", "AT-MAT-17"},
+        "audio_id": "math_operations_audio_1",
+        "content": (
+            "Em uma adicao, juntamos quantidades. As partes que somamos se chamam parcelas e o resultado se chama soma ou total. "
+            "Em uma subtracao, uma quantidade diminui. Podemos retirar, gastar, perder ou doar. O resultado mostra quanto restou. "
+            "Nos problemas da apostila, leia a situacao com calma, descubra se precisa juntar ou retirar e depois calcule. "
+            "Use desenhos, material dourado ou pecas de quebra-cabeca para conferir o resultado."
+        ),
+        "images": [
+            {"id": "math_operations_img_1", "description": "adicao com objetos", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_operations_img_2", "description": "subtracao com objetos sendo retirados", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_operations_img_3", "description": "quebra-cabeca de resultados", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+        ],
+    },
+    {
+        "title": "Formas planas e solidos geometricos",
+        "codes": {"AT-MAT-18", "AT-MAT-19", "AT-MAT-20"},
+        "audio_id": "math_geometry_audio_1",
+        "content": (
+            "As formas planas aparecem em desenhos e objetos. O triangulo tem tres lados. O quadrado tem quatro lados iguais. "
+            "O retangulo tem quatro lados, com dois lados maiores e dois menores. O circulo e redondo. "
+            "Os solidos geometricos tem volume. A esfera parece uma bola, o cubo parece um dado, o cilindro parece uma lata e o cone parece uma casquinha. "
+            "Use esse apoio para classificar formas e solidos."
+        ),
+        "images": [
+            {"id": "math_geometry_img_1", "description": "formas geometricas planas", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_geometry_img_2", "description": "solidos geometricos", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+        ],
+    },
+    {
+        "title": "Medidas, relogio e calendario",
+        "codes": {"AT-MAT-21", "AT-MAT-22", "AT-MAT-23", "AT-MAT-24"},
+        "audio_id": "math_measures_audio_1",
+        "content": (
+            "Para medir comprimento, podemos usar regua, fita metrica ou trena. Um metro tem 100 centimetros. "
+            "Para medir peso, usamos balanca. Para medir tempo, usamos relogio e calendario. "
+            "No relogio, o ponteiro pequeno marca as horas e o ponteiro grande marca os minutos. "
+            "No calendario, observamos mes, dias da semana, semanas completas e datas importantes."
+        ),
+        "images": [
+            {"id": "math_measures_img_1", "description": "regua fita metrica trena e balanca", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_measures_img_2", "description": "relogio analogico e digital", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+            {"id": "math_measures_img_3", "description": "calendario mensal", "illustration_type": "generated", "active_style": "pictogram", "is_active": True, "image_url": None},
+        ],
+    },
+]
+
+
+def _seed_math_stories(session: Session, teacher: User) -> dict[str, Story]:
+    story_by_code: dict[str, Story] = {}
+    for definition in MATH_STORY_DEFINITIONS:
+        story = _seed_context_story(
+            session,
+            teacher,
+            definition["title"],
+            definition["content"],
+            definition["images"],
+            definition["audio_id"],
+        )
+        for code in definition["codes"]:
+            story_by_code[code] = story
+    return story_by_code
+
+
 def _get_teacher(session: Session) -> User:
     teacher = session.exec(select(User).where(User.email == "professor@eduadapt.local")).first()
     if not teacher:
@@ -391,6 +492,9 @@ def _seed_adaptations(session: Session, activity: Activity, versoes: dict, profi
             )
         ).first()
         if existing:
+            if existing.status != "published":
+                existing.status = "published"
+                session.add(existing)
             continue
 
         output_data = _build_output_data(versao, version_key)
@@ -401,7 +505,7 @@ def _seed_adaptations(session: Session, activity: Activity, versoes: dict, profi
             student_profile_id=profile_id,
             generated_by="seed",
             output_data=output_data,
-            status="approved",
+            status="published",
             version=1,
         ))
         count += 1
@@ -412,8 +516,10 @@ def _seed_math_activities(session: Session, teacher: User, profiles: dict) -> No
     total_activities = 0
     total_adaptations = 0
     excluded = {"code", "versoes"}
+    story_by_code = _seed_math_stories(session, teacher)
 
     for act_data in APOSTILA_MATEMATICA_ACTIVITIES:
+        code = act_data["code"]
         versoes = act_data["versoes"]
         fields = {k: v for k, v in act_data.items() if k not in excluded}
         fields.update({
@@ -421,8 +527,11 @@ def _seed_math_activities(session: Session, teacher: User, profiles: dict) -> No
             "school_year": "até 7º ano",
             "base_complexity": 2,
             "original_modality": "apostila impressa",
-            "teacher_notes": f"{act_data['code']} - Fonte: Apostila de Matemática transcrita.",
+            "teacher_notes": f"{code} - Fonte: Apostila de Matemática transcrita.",
         })
+        linked_story = story_by_code.get(code)
+        if linked_story:
+            fields["story_id"] = linked_story.id
 
         existing = session.exec(
             select(Activity).where(
@@ -432,6 +541,16 @@ def _seed_math_activities(session: Session, teacher: User, profiles: dict) -> No
         ).first()
         if existing:
             activity = existing
+            changed = False
+            for key, value in fields.items():
+                if getattr(activity, key, None) != value:
+                    setattr(activity, key, value)
+                    changed = True
+            if activity.status != "active":
+                activity.status = "active"
+                changed = True
+            if changed:
+                session.add(activity)
         else:
             activity = Activity(id=str(uuid.uuid4()), teacher_id=teacher.id, status="active", **fields)
             session.add(activity)
